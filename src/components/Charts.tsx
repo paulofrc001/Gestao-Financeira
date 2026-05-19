@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 const emotionalData = [
@@ -10,9 +11,13 @@ const emotionalData = [
 ];
 
 export function EmotionalRadarChart() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return <div className="h-[300px] w-full bg-slate-900/10 animate-pulse rounded-2xl" />;
+
   return (
-    <div className="h-[300px] w-full min-h-[300px]">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+    <div className="h-[300px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
         <RadarChart cx="50%" cy="50%" outerRadius="80%" data={emotionalData}>
           <PolarGrid stroke="#1E293B" />
           <PolarAngleAxis dataKey="subject" tick={{ fill: '#94A3B8', fontSize: 10 }} />
@@ -59,9 +64,13 @@ const pieData = [
 const COLORS = ['#6366F1', '#4F46E5', '#312E81', '#1E1B4B', '#09090B'];
 
 export function MainFlowChart() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return <div className="h-[300px] w-full bg-slate-900/10 animate-pulse rounded-2xl" />;
+
   return (
-    <div className="h-[300px] w-full min-h-[300px]">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+    <div className="h-[300px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data}>
           <defs>
             <linearGradient id="colorEntrada" x1="0" y1="0" x2="0" y2="1">
@@ -119,9 +128,13 @@ export function MainFlowChart() {
 }
 
 export function CategoriesPieChart() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return <div className="h-[200px] w-full bg-slate-900/10 animate-pulse rounded-full" />;
+
   return (
-    <div className="h-[200px] w-full min-h-[200px]">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+    <div className="h-[200px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={pieData}
