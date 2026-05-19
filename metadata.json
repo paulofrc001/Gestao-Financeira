@@ -1,0 +1,6 @@
+{
+  "name": "Finna AI - Gestão Financeira Familiar",
+  "description": "Aplicativo premium de gestão financeira familiar inteligente com IA, controle emocional de gastos e metas compartilhadas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
