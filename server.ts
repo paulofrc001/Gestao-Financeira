@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -161,8 +160,13 @@ app.post('/api/ai/parse-statement', async (req, res) => {
 });
 
 // Setup Vite or Static File Serving
-async function setupFrontend() {
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+async function setupFrontend(app: express.Application) {
+  // Only setup static serving or Vite if NOT on Vercel
+  // Vercel handles static files via its own CDN based on the build output
+  if (process.env.VERCEL) return;
+
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -177,11 +181,9 @@ async function setupFrontend() {
   }
 }
 
-// Check if running directly
-const isMain = process.env.VERCEL ? false : true;
-
-if (isMain) {
-  setupFrontend().then(() => {
+// Start sequence
+if (!process.env.VERCEL) {
+  setupFrontend(app).then(() => {
     const PORT = Number(process.env.PORT) || 3000;
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on http://localhost:${PORT}`);
