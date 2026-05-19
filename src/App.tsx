@@ -652,6 +652,12 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
     setError('');
     setLoading(true);
 
+    if (!isSupabaseConfigured) {
+      toast.success('Entrando no modo demonstração...');
+      setTimeout(() => onLogin(), 500);
+      return;
+    }
+
     try {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
@@ -706,10 +712,10 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
                 <div className="space-y-2">
                   <Label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Email</Label>
                   <Input 
-                    type="email"
+                    type="text"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="seu@email.com" 
+                    placeholder="usuário ou email" 
                     className="rounded-xl border-slate-800 bg-slate-900/50 h-12 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" 
                     required
                   />
