@@ -11,8 +11,8 @@ const emotionalData = [
 
 export function EmotionalRadarChart() {
   return (
-    <div className="h-[300px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="h-[300px] w-full min-h-[300px]">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
         <RadarChart cx="50%" cy="50%" outerRadius="80%" data={emotionalData}>
           <PolarGrid stroke="#1E293B" />
           <PolarAngleAxis dataKey="subject" tick={{ fill: '#94A3B8', fontSize: 10 }} />
@@ -60,8 +60,8 @@ const COLORS = ['#6366F1', '#4F46E5', '#312E81', '#1E1B4B', '#09090B'];
 
 export function MainFlowChart() {
   return (
-    <div className="h-[300px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="h-[300px] w-full min-h-[300px]">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
         <AreaChart data={data}>
           <defs>
             <linearGradient id="colorEntrada" x1="0" y1="0" x2="0" y2="1">
@@ -120,8 +120,8 @@ export function MainFlowChart() {
 
 export function CategoriesPieChart() {
   return (
-    <div className="h-[200px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="h-[200px] w-full min-h-[200px]">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
         <PieChart>
           <Pie
             data={pieData}

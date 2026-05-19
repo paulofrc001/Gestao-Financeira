@@ -763,14 +763,27 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
                   {!loading && <ChevronRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />}
                 </Button>
 
-                <div className="text-center pt-2">
+                <div className="text-center pt-2 space-y-4">
                   <button 
                     type="button"
                     onClick={() => setIsSignUp(!isSignUp)}
-                    className="text-[10px] text-slate-500 uppercase tracking-widest font-black hover:text-indigo-400 transition-colors"
+                    className="text-[10px] text-slate-500 uppercase tracking-widest font-black hover:text-indigo-400 transition-colors block w-full"
                   >
                     {isSignUp ? 'Já tem conta? Entrar' : 'Novo por aqui? Criar Acesso'}
                   </button>
+
+                  {!isSignUp && (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        toast.success('Acessando modo demonstração...');
+                        setTimeout(onLogin, 500);
+                      }}
+                      className="text-[10px] text-indigo-500/50 uppercase tracking-widest font-black hover:text-indigo-400 transition-colors italic"
+                    >
+                      Bypass: Acesso Rápido (Sem E-mail)
+                    </button>
+                  )}
                 </div>
               </form>
             </CardContent>

@@ -16,14 +16,19 @@ async function startServer() {
   // Gemini AI Setup
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY || '',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
   });
 
   // Helper for AI calls with retry
   async function generateWithRetry(params: any, retries = 3) {
     for (let i = 0; i <= retries; i++) {
        try {
-          // Use gemini-1.5-flash as default if not specified
-          if (!params.model) params.model = 'gemini-1.5-flash';
+          // Use gemini-3-flash-preview as default if not specified
+          if (!params.model) params.model = 'gemini-3-flash-preview';
           return await ai.models.generateContent(params);
        } catch (error: any) {
           const errorMessage = error.message?.toLowerCase() || '';
@@ -52,6 +57,7 @@ async function startServer() {
 
   // Endpoint for IA Insights
   app.post('/api/ai/insights', async (req, res) => {
+    console.log('[API] Generating insights...');
     try {
       const { transactions, goals } = req.body;
       
@@ -78,13 +84,14 @@ async function startServer() {
       `;
 
       const result = await generateWithRetry({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
         }
       });
       
+      console.log('[API] Insights generated');
       res.json(JSON.parse(result.text || '{}'));
     } catch (error: any) {
       console.error('AI Insight Error:', error);
@@ -103,7 +110,7 @@ async function startServer() {
       // Simple retry for chat manually since we can't use generateWithRetry directly for chat sessions easily with this SDK pattern
       let response;
       const chat = ai.chats.create({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         config: {
           systemInstruction: 'Você é o Finna, um assistente de gestão financeira familiar. Seja educado, profissional e ajude a família a economizar e ter controle emocional sobre o dinheiro.'
         }
@@ -137,9 +144,15 @@ async function startServer() {
 
   // Endpoint for Statement Parsing
   app.post('/api/ai/parse-statement', async (req, res) => {
+    console.log('[API] Processing parse-statement request...');
     try {
       const { text, fileType } = req.body;
       
+      if (!text) {
+        console.warn('[API] Missing text in request');
+        return res.status(400).json({ error: 'Faltando conteúdo do extrato' });
+      }
+
       const prompt = `
         Aja como um extrator de dados financeiros de alto nível e analista preditivo.
         Analise o texto abaixo extraído de um arquivo ${fileType}. Pode ser um extrato bancário ou uma fatura de CARTÃO DE CRÉDITO.
@@ -181,13 +194,14 @@ async function startServer() {
       `;
 
       const result = await generateWithRetry({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
         }
       });
       
+      console.log('[API] Statement parsed successfully');
       res.json(JSON.parse(result.text || '{}'));
     } catch (error: any) {
       console.error('Statement Parse Error:', error);
