@@ -662,7 +662,8 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        toast.success('Conta criada! Verifique seu email.');
+        toast.success('Conta criada com sucesso!');
+        if (!error) setIsSignUp(false); // Switch to login after signup
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -674,6 +675,8 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
       
       if (err.status === 429 || message.includes('429')) {
         message = 'Muitos acessos (Rate Limit). Aguarde 1 minuto.';
+      } else if (message.includes('Email not confirmed')) {
+        message = 'E-mail não confirmado. Desative "Confirm Email" nas configurações de Auth do Supabase.';
       } else if (message.includes('apikey') || message.includes('No API key')) {
         message = 'Erro de Chave API. Verifique sua ANON_KEY.';
       } else if (message === 'Failed to fetch') {
