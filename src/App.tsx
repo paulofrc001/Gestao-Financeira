@@ -676,89 +676,95 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
-        {!isSupabaseConfigured && (
-          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 p-4 rounded-2xl mb-8 flex items-start gap-4 animate-bounce-subtle">
-            <AlertCircle className="w-6 h-6 shrink-0" />
-            <div className="space-y-1">
-              <p className="text-sm font-bold uppercase tracking-wider">Configuração Necessária</p>
-              <p className="text-xs font-medium opacity-80 leading-relaxed italic">
-                Supabase não configurado. Adicione VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas Configurações (menu à direita) para usar a autenticação e banco de dados.
-              </p>
-            </div>
-          </div>
-        )}
+    <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4 font-sans selection:bg-indigo-500/30">
+      <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-700">
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-600/20 mb-4">
-            <TrendingUp className="text-white w-8 h-8" />
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2.5rem] shadow-2xl shadow-indigo-600/30 mb-2 rotate-3 hover:rotate-0 transition-transform">
+            <TrendingUp className="text-white w-10 h-10" />
           </div>
-          <h1 className="text-4xl font-bold tracking-tighter text-white italic">Finna<span className="text-indigo-500">AI</span></h1>
-          <p className="text-slate-400 text-sm font-medium uppercase tracking-[0.2em]">Gestão Financeira de Elite</p>
+          <h1 className="text-5xl font-black tracking-tighter text-white italic">Finna<span className="text-indigo-500">AI</span></h1>
+          <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.3em] opacity-80">Seu cérebro financeiro</p>
         </div>
 
-        <Card className="bg-slate-900/40 border-slate-800 shadow-2xl rounded-3xl overflow-hidden backdrop-blur-xl">
-          <CardHeader className="pt-8 px-8 pb-4">
-            <CardTitle className="text-xl font-bold text-slate-100 italic">
-              {isSignUp ? 'Criar nova conta' : 'Bem-vindo de volta'}
-            </CardTitle>
-            <CardDescription className="text-slate-500">
-              {isSignUp ? 'Comece sua jornada financeira com IA.' : 'Acesse o comando central da sua família.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-8 pt-0">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Email</Label>
-                  <Input 
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="usuário ou email" 
-                    className="rounded-xl border-slate-800 bg-slate-900/50 h-12 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" 
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Senha</Label>
-                  <Input 
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••" 
-                    className="rounded-xl border-slate-800 bg-slate-900/50 h-12 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" 
-                    required
-                  />
-                </div>
-              </div>
+        {!isSupabaseConfigured ? (
+          <div className="bg-slate-900/40 border border-slate-800/50 p-10 rounded-[3rem] backdrop-blur-2xl shadow-2xl space-y-8 text-center">
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-slate-100 italic">Modo Demonstração</h2>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                Explore todas as funcionalidades da FinnaAI instantaneamente.
+              </p>
+            </div>
+            
+            <Button 
+              onClick={handleSubmit}
+              disabled={loading}
+              className="w-full rounded-2xl h-14 bg-indigo-600 hover:bg-indigo-700 font-black transition-all shadow-xl shadow-indigo-600/30 text-white text-lg group"
+            >
+              {loading ? 'Preparando...' : 'Acessar App Agora'}
+              {!loading && <ChevronRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />}
+            </Button>
 
-              {error && <p className="text-rose-500 text-[10px] font-bold uppercase tracking-wider text-center animate-shake">{error}</p>}
-
-              <Button 
-                type="submit" 
-                disabled={loading}
-                className="w-full rounded-2xl h-12 bg-indigo-600 hover:bg-indigo-700 font-bold transition-all shadow-xl shadow-indigo-600/20 text-white group"
-              >
-                {loading ? 'Processando...' : isSignUp ? 'Criar Conta' : 'Iniciar Sessão Segura'}
-                {!loading && <ChevronRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />}
-              </Button>
-
-              <div className="text-center">
-                <button 
-                  type="button"
-                  onClick={() => setIsSignUp(!isSignUp)}
-                  className="text-[10px] text-slate-400 uppercase tracking-widest font-bold hover:text-indigo-400 transition-colors"
-                >
-                  {isSignUp ? 'Já tem uma conta? Entrar' : 'Não tem conta? Cadastre-se'}
-                </button>
-              </div>
-            </form>
-          </CardContent>
-          <div className="px-8 pb-8 text-center border-t border-slate-800/50 pt-6 bg-slate-900/20">
-            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-medium">Conexão Segura Supabase SSL</p>
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold italic">
+              Conexão Supabase não detectada
+            </p>
           </div>
-        </Card>
+        ) : (
+          <Card className="bg-slate-900/40 border-slate-800/50 shadow-2xl rounded-[3rem] overflow-hidden backdrop-blur-2xl border-none">
+            <CardContent className="p-10">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-[10px] uppercase tracking-widest font-black text-slate-500 italic ml-1">Identificação</Label>
+                    <Input 
+                      type="text"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Usuário ou Email" 
+                      className="rounded-2xl border-slate-800 bg-slate-950/50 h-14 text-slate-100 placeholder:text-slate-800 focus:ring-2 ring-indigo-500/20 border-none px-6" 
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] uppercase tracking-widest font-black text-slate-500 italic ml-1">Senha</Label>
+                    <Input 
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••" 
+                      className="rounded-2xl border-slate-800 bg-slate-950/50 h-14 text-slate-100 placeholder:text-slate-800 focus:ring-2 ring-indigo-500/20 border-none px-6" 
+                      required
+                    />
+                  </div>
+                </div>
+
+                {error && <p className="text-rose-500 text-[10px] font-bold uppercase tracking-wider text-center animate-shake">{error}</p>}
+
+                <Button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full rounded-2xl h-14 bg-indigo-600 hover:bg-indigo-700 font-black transition-all shadow-xl shadow-indigo-600/30 text-white text-lg group"
+                >
+                  {loading ? 'Autenticando...' : isSignUp ? 'Criar Acesso' : 'Entrar'}
+                  {!loading && <ChevronRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />}
+                </Button>
+
+                <div className="text-center pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setIsSignUp(!isSignUp)}
+                    className="text-[10px] text-slate-500 uppercase tracking-widest font-black hover:text-indigo-400 transition-colors"
+                  >
+                    {isSignUp ? 'Já tem conta? Entrar' : 'Novo por aqui? Criar Acesso'}
+                  </button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+        
+        <p className="text-center text-[10px] text-slate-600 uppercase tracking-[0.3em] font-bold">
+          © 2024 FinnaAI Labs
+        </p>
       </div>
     </div>
   );
