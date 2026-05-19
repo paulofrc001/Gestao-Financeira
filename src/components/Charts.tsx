@@ -17,7 +17,7 @@ export function EmotionalRadarChart() {
 
   return (
     <div className="h-[300px] w-full">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+      <ResponsiveContainer width="100%" height={300}>
         <RadarChart cx="50%" cy="50%" outerRadius="80%" data={emotionalData}>
           <PolarGrid stroke="#1E293B" />
           <PolarAngleAxis dataKey="subject" tick={{ fill: '#94A3B8', fontSize: 10 }} />
@@ -70,7 +70,7 @@ export function MainFlowChart({ data = defaultData }: { data?: { name: string; e
 
   return (
     <div className="h-[300px] w-full">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+      <ResponsiveContainer width="100%" height={300}>
         <AreaChart data={data}>
           <defs>
             <linearGradient id="colorEntrada" x1="0" y1="0" x2="0" y2="1">
@@ -134,7 +134,7 @@ export function CategoriesPieChart({ data = defaultPieData }: { data?: { name: s
 
   return (
     <div className="h-[200px] w-full">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+      <ResponsiveContainer width="100%" height={200}>
         <PieChart>
           <Pie
             data={data}

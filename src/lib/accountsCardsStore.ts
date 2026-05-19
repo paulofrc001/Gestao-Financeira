@@ -264,13 +264,15 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
   }
 
   try {
+    const { data: { user } } = await supabase.auth.getUser();
     const payload = {
       account_id: card.account_id,
       name: card.name,
       limit_amount: card.limit_amount,
       closing_day: card.closing_day,
       due_day: card.due_day,
-      brand: card.brand
+      brand: card.brand,
+      user_id: user?.id
     };
 
     let result;
