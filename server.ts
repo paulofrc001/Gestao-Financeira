@@ -16,24 +16,28 @@ async function startServer() {
   // Gemini AI Setup
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY || '',
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
-    }
   });
 
   // Helper for AI calls with retry
-  async function generateWithRetry(params: any, retries = 2) {
+  async function generateWithRetry(params: any, retries = 3) {
     for (let i = 0; i <= retries; i++) {
        try {
+          // Use gemini-1.5-flash as default if not specified
+          if (!params.model) params.model = 'gemini-1.5-flash';
           return await ai.models.generateContent(params);
        } catch (error: any) {
-          if (i === retries) throw error;
-          const isRetryable = error.message.includes('503') || error.message.includes('overloaded') || error.message.includes('high demand');
-          if (isRetryable) {
-             console.log(`AI high demand, retrying... (${i + 1}/${retries})`);
-             await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential-ish backoff
+          const errorMessage = error.message?.toLowerCase() || '';
+          const isRetryable = errorMessage.includes('429') || 
+                            errorMessage.includes('too many requests') ||
+                            errorMessage.includes('503') || 
+                            errorMessage.includes('overloaded') || 
+                            errorMessage.includes('high demand') ||
+                            errorMessage.includes('quota');
+          
+          if (isRetryable && i < retries) {
+             const waitTime = (i + 1) * 2000; // Increased backoff
+             console.log(`AI busy or rate limited (429/503), retrying in ${waitTime}ms... (${i + 1}/${retries})`);
+             await new Promise(resolve => setTimeout(resolve, waitTime));
              continue;
           }
           throw error;
@@ -74,7 +78,7 @@ async function startServer() {
       `;
 
       const result = await generateWithRetry({
-        model: 'gemini-flash-latest',
+        model: 'gemini-1.5-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
@@ -84,7 +88,10 @@ async function startServer() {
       res.json(JSON.parse(result.text || '{}'));
     } catch (error: any) {
       console.error('AI Insight Error:', error);
-      res.status(500).json({ error: error.message });
+      const isRateLimit = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
+      res.status(isRateLimit ? 429 : 500).json({ 
+        error: isRateLimit ? 'Muitas solicitações à IA. Por favor, aguarde um momento.' : error.message 
+      });
     }
   });
 
@@ -92,24 +99,26 @@ async function startServer() {
   app.post('/api/ai/chat', async (req, res) => {
     try {
       const { message, history } = req.body;
+      
+      // Simple retry for chat manually since we can't use generateWithRetry directly for chat sessions easily with this SDK pattern
+      let response;
       const chat = ai.chats.create({
-        model: 'gemini-flash-latest',
+        model: 'gemini-1.5-flash',
         config: {
           systemInstruction: 'Você é o Finna, um assistente de gestão financeira familiar. Seja educado, profissional e ajude a família a economizar e ter controle emocional sobre o dinheiro.'
         }
       });
 
-      // Simple retry for chat
-      let response;
-      for (let i = 0; i <= 2; i++) {
+      for (let i = 0; i <= 3; i++) {
         try {
           response = await chat.sendMessage({ message });
           break;
         } catch (error: any) {
-          if (i === 2) throw error;
-          const isRetryable = error.message.includes('503') || error.message.includes('overloaded') || error.message.includes('high demand');
-          if (isRetryable) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+          const errorMessage = error.message?.toLowerCase() || '';
+          const isRetryable = errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('503') || errorMessage.includes('overloaded');
+          
+          if (isRetryable && i < 3) {
+            await new Promise(resolve => setTimeout(resolve, (i + 1) * 2000));
             continue;
           }
           throw error;
@@ -119,7 +128,10 @@ async function startServer() {
       if (!response) throw new Error('No response from AI');
       res.json({ text: response.text });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      const isRateLimit = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
+      res.status(isRateLimit ? 429 : 500).json({ 
+        error: isRateLimit ? 'IA temporariamente ocupada (limite de quota). Tente em alguns segundos.' : error.message 
+      });
     }
   });
 
@@ -139,7 +151,7 @@ async function startServer() {
         4. Categorização automática baseada em padrões.
         5. PREVISÃO: Se for cartão, identifique parcelamentos (ex: "Compra X 1/10") e projete gastos futuros.
         6. IA INSIGHTS: Identifique desperdícios, assinaturas duplicadas e sugira cortes.
-
+ 
         Texto do documento:
         ${text}
         
@@ -169,7 +181,7 @@ async function startServer() {
       `;
 
       const result = await generateWithRetry({
-        model: 'gemini-flash-latest',
+        model: 'gemini-1.5-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
@@ -179,7 +191,10 @@ async function startServer() {
       res.json(JSON.parse(result.text || '{}'));
     } catch (error: any) {
       console.error('Statement Parse Error:', error);
-      res.status(500).json({ error: error.message });
+      const isRateLimit = error.message?.includes('429') || error.message?.toLowerCase().includes('quota');
+      res.status(isRateLimit ? 429 : 500).json({ 
+        error: isRateLimit ? 'Limite de processamento da IA atingido. Tente novamente em 1 minuto.' : error.message 
+      });
     }
   });
 
