@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Upload, FileUp, ShieldCheck, AlertCircle, Save, Trash2, 
   Sparkles, CheckCircle2, TrendingDown, Clock, HelpCircle, 
@@ -14,6 +14,14 @@ import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
+import { getAccounts, Account } from '../lib/accountsCardsStore';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,17 +30,31 @@ export default function ImportPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [insights, setInsights] = useState<any>(null);
   const [isCreditCard, setIsCreditCard] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState('Principal');
+  
+  // Dynamic accounts state
+  const [realAccounts, setRealAccounts] = useState<Account[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [customOrigin, setCustomOrigin] = useState('');
 
   const { parseStatement, loading: aiLoading, error: aiError } = useGemini();
 
-  const ACCOUNTS = [
-    { id: '1', name: 'Nubank Principal', type: 'Checking' },
-    { id: '2', name: 'XP Investimentos', type: 'Investment' },
-    { id: '3', name: 'Itaú Personalité', type: 'Checking' },
-    { id: '4', name: 'Visa Infinite (Cartão)', type: 'Credit' },
-  ];
+  useEffect(() => {
+    async function fetchAccounts() {
+      try {
+        const accs = await getAccounts();
+        setRealAccounts(accs);
+        if (accs.length > 0) {
+          const primary = accs.find(a => a.name.includes('Nubank') || a.name.includes('Principal')) || accs[0];
+          setSelectedAccount(primary.name);
+          setSelectedAccountId(primary.id);
+        }
+      } catch (err) {
+        console.error('Error fetching accounts in ImportPage:', err);
+      }
+    }
+    fetchAccounts();
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -99,38 +121,97 @@ export default function ImportPage() {
   };
 
   const saveTransactions = async () => {
-    if (!isSupabaseConfigured) {
-      toast.error('Por favor, configure sua SUPABASE_URL nas Configurações.');
-      return;
-    }
     setParsing(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast.error('Você precisa estar logado para salvar.');
-        return;
+      const sourceName = customOrigin || selectedAccount;
+      
+      // Determine final account_id
+      const matchedAcc = realAccounts.find(a => a.id === selectedAccountId || a.name === sourceName);
+      const accId = matchedAcc ? matchedAcc.id : null;
+
+      // 1. SUPABASE MODE
+      if (isSupabaseConfigured) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          toast.error('Você precisa estar logado para salvar.');
+          setParsing(false);
+          return;
+        }
+
+        const txsToSave = transactions.map(tx => {
+          const finalAmount = tx.amount;
+          return {
+            user_id: user.id,
+            description: tx.description,
+            amount: finalAmount,
+            category: tx.category || 'Outros',
+            date: tx.date,
+            type: finalAmount > 0 ? ('income' as const) : ('expense' as const),
+            is_subscription: tx.isSubscription || false,
+            is_recurring: tx.isRecurring || false,
+            installments: tx.installments || null,
+            emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
+            status: 'completed',
+            source: sourceName,
+            account_id: accId
+          };
+        });
+
+        const { error } = await supabase.from('transactions').insert(txsToSave);
+        if (error) throw error;
+
+        // Sum up total import amounts to update balance
+        const totalDelta = transactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
+        if (matchedAcc && totalDelta !== 0) {
+          const { error: balanceErr } = await supabase
+            .from('accounts')
+            .update({ balance: matchedAcc.balance + totalDelta })
+            .eq('id', matchedAcc.id);
+          if (balanceErr) console.error('Error updating account balance in DB:', balanceErr);
+        }
+
+        toast.success(`${transactions.length} transações salvas com sucesso no banco de dados!`);
+      } else {
+        // 2. OFFLINE / LOCALSTORAGE MODE
+        const localSaved = localStorage.getItem('finna_transactions');
+        const existingList = localSaved ? JSON.parse(localSaved) : [];
+
+        const generatedTxs = transactions.map(tx => {
+          const finalAmount = tx.amount;
+          return {
+            id: 'tx-' + Math.random().toString(36).substring(2, 9),
+            description: tx.description,
+            amount: finalAmount,
+            category: tx.category || 'Outros',
+            date: tx.date,
+            type: finalAmount > 0 ? 'income' : 'expense',
+            is_subscription: tx.isSubscription || false,
+            is_recurring: tx.isRecurring || false,
+            installments: tx.installments || null,
+            emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
+            status: 'completed',
+            source: sourceName,
+            account_id: accId
+          };
+        });
+
+        localStorage.setItem('finna_transactions', JSON.stringify([...generatedTxs, ...existingList]));
+
+        // Update local balance of account
+        const totalDelta = transactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
+        if (matchedAcc && totalDelta !== 0) {
+          const allLocalAccs = realAccounts.map(a => {
+            if (a.id === matchedAcc.id) {
+              return { ...a, balance: a.balance + totalDelta };
+            }
+            return a;
+          });
+          localStorage.setItem('finna_accounts', JSON.stringify(allLocalAccs));
+        }
+
+        toast.success(`${transactions.length} transações salvas localmente no modo demonstração!`);
       }
 
-      const txsToSave = transactions.map(tx => ({
-        user_id: user.id,
-        description: tx.description,
-        amount: tx.amount,
-        category: tx.category,
-        date: tx.date,
-        type: tx.amount > 0 ? 'income' : 'expense',
-        is_subscription: tx.isSubscription || false,
-        is_recurring: tx.isRecurring || false,
-        installments: tx.installments || null,
-        emotion: tx.suggestedEmotion || 'Neutro',
-        status: 'completed',
-        source: customOrigin || selectedAccount
-      }));
-
-      const { error } = await supabase.from('transactions').insert(txsToSave);
-      
-      if (error) throw error;
-
-      toast.success(`${transactions.length} transações salvas com sucesso!`);
       setStep('upload');
       setFile(null);
       setTransactions([]);
@@ -172,12 +253,25 @@ export default function ImportPage() {
               Revisão de {isCreditCard ? 'Fatura' : 'Extrato'}
               <div className="flex items-center gap-2 ml-4">
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest italic">Origem:</span>
-                <Input 
-                  value={customOrigin} 
-                  onChange={(e) => setCustomOrigin(e.target.value)} 
-                  placeholder={selectedAccount}
-                  className="h-8 bg-slate-900/50 border-slate-800 text-[10px] w-40 rounded-lg focus:border-indigo-500 transition-all italic text-indigo-400 font-bold"
-                />
+                <Select value={selectedAccountId} onValueChange={(val) => {
+                  setSelectedAccountId(val);
+                  const matched = realAccounts.find(a => a.id === val);
+                  if (matched) {
+                    setSelectedAccount(matched.name);
+                    setCustomOrigin(matched.name);
+                  }
+                }}>
+                  <SelectTrigger className="h-8 bg-[#0a0a0d] border-slate-800 text-[10px] w-48 rounded-lg focus:border-indigo-500 transition-all font-bold text-indigo-400">
+                    <SelectValue placeholder="Selecione a conta..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
+                    {realAccounts.map(acc => (
+                      <SelectItem key={acc.id} value={acc.id} className="text-[11px] font-medium text-slate-200">
+                        {acc.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </h2>
             <p className="text-slate-400 text-sm">Validando {transactions.length} transações identificadas pela FinnaAI.</p>
@@ -329,12 +423,17 @@ export default function ImportPage() {
       </div>
 
       <Card className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
-        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex gap-2">
-           {ACCOUNTS.map(acc => (
+        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 max-w-[90%] md:max-w-md">
+           {realAccounts.map(acc => (
              <button
                key={acc.id}
-               onClick={() => setSelectedAccount(acc.name)}
-               className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border transition-all ${selectedAccount === acc.name ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}
+               type="button"
+               onClick={() => {
+                 setSelectedAccount(acc.name);
+                 setSelectedAccountId(acc.id);
+                 setCustomOrigin(acc.name);
+               }}
+               className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border transition-all ${selectedAccountId === acc.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}
              >
                {acc.name}
              </button>

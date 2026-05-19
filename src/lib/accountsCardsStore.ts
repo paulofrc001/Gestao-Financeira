@@ -29,8 +29,9 @@ export interface Card {
 export const INITIAL_DEMO_ACCOUNTS: Account[] = [
   { id: 'acc-1', name: 'Nubank Principal', type: 'Checking', balance: 3450.00, currency: 'BRL', color: '#820ad1' },
   { id: 'acc-2', name: 'Itaú Recebimento', type: 'Checking', balance: 8520.40, currency: 'BRL', color: '#ec7000' },
-  { id: 'acc-3', name: 'XP Investimentos', type: 'Investment', balance: 25000.00, currency: 'BRL', color: '#000000' },
-  { id: 'acc-4', name: 'Almoço & Dinheiro', type: 'Cash', balance: 350.00, currency: 'BRL', color: '#10b981' }
+  { id: 'acc-3', name: 'Itaú', type: 'Checking', balance: 1450.00, currency: 'BRL', color: '#0284c7' },
+  { id: 'acc-4', name: 'Dinheiro', type: 'Cash', balance: 350.00, currency: 'BRL', color: '#10b981' },
+  { id: 'acc-5', name: 'XP Investimentos', type: 'Investment', balance: 25000.00, currency: 'BRL', color: '#000000' }
 ];
 
 export const INITIAL_DEMO_CARDS: Card[] = [

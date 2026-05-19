@@ -32,11 +32,11 @@ const NAV_ITEMS = [
 ];
 
 export const INITIAL_DEMO_TRANSACTIONS = [
-  { id: 'tx-1', description: 'Supermercado Pão de Açúcar', date: '2026-05-18', amount: -452.90, category: 'alimentacao', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro' },
-  { id: 'tx-2', description: 'Assinatura Netflix Premium', date: '2026-05-15', amount: -55.90, category: 'lazer', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro', is_recurring: true },
-  { id: 'tx-3', description: 'Salário Paulo M.', date: '2026-05-05', amount: 8500.00, category: 'Salário', type: 'income', source: 'Itaú Recebimento', status: 'completed', emotion: 'Satisfeito' },
-  { id: 'tx-4', description: 'Condomínio e Aluguel', date: '2026-05-01', amount: -2300.00, category: 'moradia', type: 'expense', source: 'Itaú', status: 'completed', emotion: 'Preocupado' },
-  { id: 'tx-5', description: 'Combustível Posto Ipiranga', date: '2026-05-19', amount: -180.00, category: 'transporte', type: 'expense', source: 'Dinheiro', status: 'completed', emotion: 'Neutro' }
+  { id: 'tx-1', description: 'Supermercado Pão de Açúcar', date: '2026-05-18', amount: -452.90, category: 'alimentacao', type: 'expense', source: 'Nubank Principal', account_id: 'acc-1', status: 'completed', emotion: 'Neutro' },
+  { id: 'tx-2', description: 'Assinatura Netflix Premium', date: '2026-05-15', amount: -55.90, category: 'lazer', type: 'expense', source: 'Nubank Principal', account_id: 'acc-1', status: 'completed', emotion: 'Neutro', is_recurring: true },
+  { id: 'tx-3', description: 'Salário Paulo M.', date: '2026-05-05', amount: 8500.00, category: 'Salário', type: 'income', source: 'Itaú Recebimento', account_id: 'acc-2', status: 'completed', emotion: 'Satisfeito' },
+  { id: 'tx-4', description: 'Condomínio e Aluguel', date: '2026-05-01', amount: -2300.00, category: 'moradia', type: 'expense', source: 'Itaú', account_id: 'acc-3', status: 'completed', emotion: 'Preocupado' },
+  { id: 'tx-5', description: 'Combustível Posto Ipiranga', date: '2026-05-19', amount: -180.00, category: 'transporte', type: 'expense', source: 'Dinheiro', account_id: 'acc-4', status: 'completed', emotion: 'Neutro' }
 ];
 
 import { Input } from '@/components/ui/input';
