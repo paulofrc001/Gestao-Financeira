@@ -672,6 +672,17 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4 font-sans">
       <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
+        {!isSupabaseConfigured && (
+          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 p-4 rounded-2xl mb-8 flex items-start gap-4 animate-bounce-subtle">
+            <AlertCircle className="w-6 h-6 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-bold uppercase tracking-wider">Configuração Necessária</p>
+              <p className="text-xs font-medium opacity-80 leading-relaxed italic">
+                Supabase não configurado. Adicione VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas Configurações (menu à direita) para usar a autenticação e banco de dados.
+              </p>
+            </div>
+          </div>
+        )}
         <div className="text-center space-y-4">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-600/20 mb-4">
             <TrendingUp className="text-white w-8 h-8" />
