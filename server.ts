@@ -1,5 +1,6 @@
-import app from './api/index.js';
+import app from './src/api.js';
 import path from 'path';
+import express from 'express';
 
 // Setup Vite or Static File Serving
 async function setupFrontend(app: any) {
@@ -21,8 +22,6 @@ async function setupFrontend(app: any) {
     });
   }
 }
-
-import express from 'express';
 
 // Start sequence
 if (!process.env.VERCEL) {

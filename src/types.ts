@@ -52,6 +52,7 @@ export interface Transaction {
   account_id: string;
   card_id?: string;
   category_id?: string;
+  category: string;
   user_id: string;
   description: string;
   amount: number;
@@ -60,6 +61,7 @@ export interface Transaction {
   status: 'pending' | 'completed';
   is_recurring: boolean;
   recurrence_period?: string;
+  installments?: string;
   source?: string;
   
   // Emotional Data

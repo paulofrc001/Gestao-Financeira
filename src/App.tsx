@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save } from 'lucide-react';
+import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Transaction } from './types';
-import { format } from 'date-fns';
+import { format, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
@@ -31,10 +31,20 @@ const NAV_ITEMS = [
   { id: 'settings', label: 'Configurações', icon: Settings },
 ];
 
+export const INITIAL_DEMO_TRANSACTIONS = [
+  { id: 'tx-1', description: 'Supermercado Pão de Açúcar', date: '2026-05-18', amount: -452.90, category: 'alimentacao', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro' },
+  { id: 'tx-2', description: 'Assinatura Netflix Premium', date: '2026-05-15', amount: -55.90, category: 'lazer', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro', is_recurring: true },
+  { id: 'tx-3', description: 'Salário Paulo M.', date: '2026-05-05', amount: 8500.00, category: 'Salário', type: 'income', source: 'Itaú Recebimento', status: 'completed', emotion: 'Satisfeito' },
+  { id: 'tx-4', description: 'Condomínio e Aluguel', date: '2026-05-01', amount: -2300.00, category: 'moradia', type: 'expense', source: 'Itaú', status: 'completed', emotion: 'Preocupado' },
+  { id: 'tx-5', description: 'Combustível Posto Ipiranga', date: '2026-05-19', amount: -180.00, category: 'transporte', type: 'expense', source: 'Dinheiro', status: 'completed', emotion: 'Neutro' }
+];
+
 import { Input } from '@/components/ui/input';
 import { MainFlowChart, CategoriesPieChart, EmotionalRadarChart } from './components/Charts';
 import NewTransactionDialog from './components/NewTransactionDialog';
+import EditTransactionDialog from './components/EditTransactionDialog';
 import ImportPage from './components/ImportPage';
+import PeriodFilter, { filterTxsByDate, DateRangeFilter } from './components/PeriodFilter';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -143,13 +153,30 @@ export default function App() {
 }
 
 function Dashboard() {
-  const [stats, setStats] = useState({ balance: 0, income: 0, expense: 0, recent: [] });
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ type: 'all' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       if (!isSupabaseConfigured) {
-        setLoading(false);
+        try {
+          const localSaved = localStorage.getItem('finna_transactions');
+          let data = [];
+          if (localSaved) {
+            data = JSON.parse(localSaved);
+          } else {
+            data = INITIAL_DEMO_TRANSACTIONS;
+            localStorage.setItem('finna_transactions', JSON.stringify(INITIAL_DEMO_TRANSACTIONS));
+          }
+          // Sort descending by date
+          data.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setAllTransactions(data);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
         return;
       }
       try {
@@ -161,14 +188,7 @@ function Dashboard() {
         if (error) throw error;
 
         if (data) {
-          const income = data.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.amount), 0);
-          const expense = data.filter(t => t.type === 'expense').reduce((acc, t) => acc + Math.abs(Number(t.amount)), 0);
-          setStats({
-            balance: income - expense,
-            income,
-            expense,
-            recent: data.slice(0, 4)
-          });
+          setAllTransactions(data);
         }
       } catch (err: any) {
         console.error(err);
@@ -183,8 +203,171 @@ function Dashboard() {
     fetchDashboardData();
   }, []);
 
+  // Filter transactions dynamically
+  const filteredTransactions = React.useMemo(() => {
+    return filterTxsByDate(allTransactions, dateFilter);
+  }, [allTransactions, dateFilter]);
+
+  // Compute stats reactively
+  const stats = React.useMemo(() => {
+    const income = filteredTransactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + Number(t.amount), 0);
+    const expense = filteredTransactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + Math.abs(Number(t.amount)), 0);
+    return {
+      balance: income - expense,
+      income,
+      expense,
+      recent: filteredTransactions.slice(0, 4)
+    };
+  }, [filteredTransactions]);
+
+  // Group by month or day intervals for the Area chart
+  const flowChartData = React.useMemo(() => {
+    const isSingleMonth = ['current_month', 'last_month', 'specific_month'].includes(dateFilter.type);
+    
+    if (isSingleMonth && dateFilter.specificMonth) {
+      // Group by 5-day intervals
+      const intervals = [
+        { name: '1-5', entrada: 0, saida: 0 },
+        { name: '6-10', entrada: 0, saida: 0 },
+        { name: '11-15', entrada: 0, saida: 0 },
+        { name: '16-20', entrada: 0, saida: 0 },
+        { name: '21-25', entrada: 0, saida: 0 },
+        { name: '26+', entrada: 0, saida: 0 },
+      ];
+
+      filteredTransactions.forEach((tx: any) => {
+        if (!tx.date) return;
+        const parts = tx.date.split('-');
+        if (parts.length < 3) return;
+        const dayNum = Number(parts[2].substring(0, 2));
+        if (isNaN(dayNum)) return;
+
+        let idx = 5; // Default for 26+
+        if (dayNum <= 5) idx = 0;
+        else if (dayNum <= 10) idx = 1;
+        else if (dayNum <= 15) idx = 2;
+        else if (dayNum <= 20) idx = 3;
+        else if (dayNum <= 25) idx = 4;
+
+        const amount = Number(tx.amount || 0);
+        if (tx.type === 'income') {
+          intervals[idx].entrada += amount;
+        } else if (tx.type === 'expense') {
+          intervals[idx].saida += Math.abs(amount);
+        }
+      });
+
+      return intervals;
+    } else {
+      // Group by month
+      const monthlyMap: Record<string, { name: string; entrada: number; saida: number; orderKey: string }> = {};
+      const now = new Date();
+      const defaultMonthsToShow = 5;
+      
+      for (let i = defaultMonthsToShow - 1; i >= 0; i--) {
+        const d = subMonths(now, i);
+        const key = format(d, 'yyyy-MM');
+        const name = format(d, 'MMM', { locale: ptBR });
+        monthlyMap[key] = {
+          name: name.charAt(0).toUpperCase() + name.slice(1),
+          entrada: 0,
+          saida: 0,
+          orderKey: key
+        };
+      }
+
+      // Add actual data
+      allTransactions.forEach((tx: any) => {
+        if (!tx.date) return;
+        const key = tx.date.substring(0, 7);
+        const amount = Number(tx.amount || 0);
+        
+        if (!monthlyMap[key]) {
+          try {
+            const d = new Date(tx.date);
+            const name = format(d, 'MMM', { locale: ptBR });
+            monthlyMap[key] = {
+              name: name.charAt(0).toUpperCase() + name.slice(1),
+              entrada: 0,
+              saida: 0,
+              orderKey: key
+            };
+          } catch {
+            return;
+          }
+        }
+
+        if (tx.type === 'income') {
+          monthlyMap[key].entrada += amount;
+        } else if (tx.type === 'expense') {
+          monthlyMap[key].saida += Math.abs(amount);
+        }
+      });
+
+      return Object.values(monthlyMap).sort((a, b) => a.orderKey.localeCompare(b.orderKey));
+    }
+  }, [filteredTransactions, allTransactions, dateFilter]);
+
+  // Compute categories distribution dynamically
+  const categoryBreakdown = React.useMemo(() => {
+    const categoryMap: Record<string, number> = {};
+    let totalExpenses = 0;
+
+    filteredTransactions.forEach((tx: any) => {
+      if (tx.type === 'expense') {
+        const amount = Math.abs(Number(tx.amount || 0));
+        const cat = tx.category || 'Outros';
+        categoryMap[cat] = (categoryMap[cat] || 0) + amount;
+        totalExpenses += amount;
+      }
+    });
+
+    const items = Object.entries(categoryMap).map(([name, val]) => {
+      const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
+      return {
+        name: formattedName,
+        value: val,
+        percentage: totalExpenses > 0 ? Math.round((val / totalExpenses) * 100) : 0
+      };
+    });
+
+    items.sort((a, b) => b.value - a.value);
+
+    // Limit to max 5 items and group the rest in "Outros"
+    if (items.length > 5) {
+      const topItems = items.slice(0, 4);
+      const remainingSum = items.slice(4).reduce((sum, item) => sum + item.value, 0);
+      topItems.push({
+        name: 'Outros',
+        value: remainingSum,
+        percentage: totalExpenses > 0 ? Math.round((remainingSum / totalExpenses) * 100) : 0
+      });
+      return { items: topItems, totalExpenses };
+    }
+
+    return {
+      items,
+      totalExpenses
+    };
+  }, [filteredTransactions]);
+
+  const progressColors = [
+    'bg-indigo-500',
+    'bg-emerald-500',
+    'bg-amber-500',
+    'bg-rose-500',
+    'bg-pink-500',
+    'bg-violet-500',
+    'bg-teal-500'
+  ];
+
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
+      <PeriodFilter 
+        transactions={allTransactions} 
+        onChange={(f) => setDateFilter(f)} 
+      />
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Saldo em Contas" value={loading ? "..." : `R$ ${stats.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={Wallet} trend="up" />
@@ -200,13 +383,23 @@ function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-lg font-bold text-slate-50">Fluxo de Caixa</CardTitle>
-                <CardDescription className="text-slate-400">Acompanhamento mensal de entradas e saídas</CardDescription>
+                <CardDescription className="text-slate-400">
+                  {['current_month', 'last_month', 'specific_month'].includes(dateFilter.type) 
+                    ? "Acompanhamento diário das movimentações" 
+                    : "Acompanhamento mensal de entradas e saídas"}
+                </CardDescription>
               </div>
-              <SelectMonth />
+              <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest bg-indigo-500/10 px-3 py-1.5 rounded-full border border-indigo-500/15">
+                {dateFilter.type === 'all' && 'Período Completo'}
+                {dateFilter.type === 'current_month' && 'Este Mês'}
+                {dateFilter.type === 'last_month' && 'Mês Passado'}
+                {dateFilter.type === 'specific_month' && dateFilter.specificMonth && `Mês: ${dateFilter.specificMonth}`}
+                {dateFilter.type === 'custom' && 'Intervalo Customizado'}
+              </span>
             </div>
           </CardHeader>
           <CardContent className="px-8 py-10">
-            <MainFlowChart />
+            <MainFlowChart data={flowChartData} />
           </CardContent>
         </Card>
 
@@ -216,11 +409,21 @@ function Dashboard() {
             <CardTitle className="text-lg font-bold text-slate-50">Distribuição Mensal</CardTitle>
           </CardHeader>
           <CardContent className="px-8 py-6 space-y-6">
-            <CategoriesPieChart />
+            <CategoriesPieChart data={categoryBreakdown.items.map(it => ({ name: it.name, value: it.value }))} />
             <div className="space-y-4 pt-4">
-              <CategoryProgress label="Moradia" value={45} amount="R$ 1.200" color="bg-indigo-500" />
-              <CategoryProgress label="Alimentação" value={22} amount="R$ 850" color="bg-slate-500" />
-              <CategoryProgress label="Lazer" value={15} amount="R$ 400" color="bg-slate-600" />
+              {categoryBreakdown.items.length > 0 ? (
+                categoryBreakdown.items.map((cat, idx) => (
+                  <CategoryProgress 
+                    key={cat.name} 
+                    label={cat.name} 
+                    value={cat.percentage} 
+                    amount={`R$ ${cat.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} 
+                    color={progressColors[idx % progressColors.length]} 
+                  />
+                ))
+              ) : (
+                <p className="text-xs text-slate-500 text-center italic py-4">Nenhuma despesa para exibir progressão.</p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -230,7 +433,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
          <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl overflow-hidden">
             <CardHeader className="px-8 py-6 flex flex-row items-center justify-between border-b border-slate-800/50">
-              <CardTitle className="text-lg font-bold text-slate-50">Últimas Transações</CardTitle>
+              <CardTitle className="text-lg font-bold text-slate-50">Últimas Transações do Período</CardTitle>
               <Button variant="link" className="text-indigo-400 font-bold text-sm">Ver todas</Button>
             </CardHeader>
             <CardContent className="px-8 py-6">
@@ -249,7 +452,7 @@ function Dashboard() {
                       />
                     ))
                   ) : (
-                    <div className="py-10 text-center text-slate-500 italic">Nenhuma transação registrada.</div>
+                    <div className="py-10 text-center text-slate-500 italic">Nenhuma transação registrada neste período.</div>
                   )}
                </div>
             </CardContent>
@@ -346,6 +549,9 @@ function TransactionsPage() {
    const [search, setSearch] = useState('');
    const [transactions, setTransactions] = useState<any[]>([]);
    const [loading, setLoading] = useState(true);
+   const [editingTransaction, setEditingTransaction] = useState<any | null>(null);
+   const [isEditOpen, setIsEditOpen] = useState(false);
+   const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ type: 'all' });
 
    useEffect(() => {
      fetchTransactions();
@@ -354,7 +560,19 @@ function TransactionsPage() {
    const fetchTransactions = async () => {
      setLoading(true);
      if (!isSupabaseConfigured) {
-       setLoading(false);
+       try {
+         const localSaved = localStorage.getItem('finna_transactions');
+         if (localSaved) {
+           setTransactions(JSON.parse(localSaved));
+         } else {
+           setTransactions(INITIAL_DEMO_TRANSACTIONS);
+           localStorage.setItem('finna_transactions', JSON.stringify(INITIAL_DEMO_TRANSACTIONS));
+         }
+       } catch (err) {
+         console.error(err);
+       } finally {
+         setLoading(false);
+       }
        return;
      }
      try {
@@ -373,15 +591,80 @@ function TransactionsPage() {
      }
    };
 
-   const filteredTransactions = transactions.filter(tx => {
-      const matchesFilter = filter === 'all' || tx.type === filter;
-      const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) || 
-                           tx.category.toLowerCase().includes(search.toLowerCase());
-      return matchesFilter && matchesSearch;
-   });
+   const handleDeleteClick = (id: string) => {
+     toast('Excluir transação permanentemente?', {
+       action: {
+         label: 'Confirmar',
+         onClick: () => executeDelete(id)
+       },
+       cancel: {
+         label: 'Cancelar',
+         onClick: () => {}
+       }
+     });
+   };
+
+   const executeDelete = async (id: string) => {
+     if (!isSupabaseConfigured) {
+       try {
+         const localSaved = localStorage.getItem('finna_transactions');
+         if (localSaved) {
+           const txs = JSON.parse(localSaved);
+           const filtered = txs.filter((t: any) => t.id !== id);
+           localStorage.setItem('finna_transactions', JSON.stringify(filtered));
+           setTransactions(filtered);
+           toast.success('Transação excluída no modo demonstração!');
+         }
+       } catch (err: any) {
+         toast.error('Erro ao excluir: ' + err.message);
+       }
+       return;
+     }
+
+     try {
+       setLoading(true);
+       const { error } = await supabase
+         .from('transactions')
+         .delete()
+         .eq('id', id);
+
+       if (error) throw error;
+       toast.success('Transação excluída com sucesso!');
+       fetchTransactions();
+     } catch (err: any) {
+       console.error(err);
+       toast.error('Erro ao excluir do Supabase: ' + err.message);
+     } finally {
+       setLoading(false);
+     }
+   };
+
+   const handleEditSuccess = () => {
+     fetchTransactions();
+   };
+
+   const filteredTransactions = React.useMemo(() => {
+     const matched = transactions.filter(tx => {
+        const matchesFilter = filter === 'all' || tx.type === filter;
+        const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) || 
+                             tx.category.toLowerCase().includes(search.toLowerCase());
+        return matchesFilter && matchesSearch;
+     });
+     return filterTxsByDate(matched, dateFilter);
+   }, [transactions, filter, search, dateFilter]);
 
    return (
       <div className="space-y-6">
+         <EditTransactionDialog 
+           open={isEditOpen} 
+           onOpenChange={setIsEditOpen} 
+           transaction={editingTransaction} 
+           onSuccess={handleEditSuccess} 
+         />
+         <PeriodFilter 
+           transactions={transactions} 
+           onChange={(f) => setDateFilter(f)} 
+         />
          <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl pt-6">
             <div className="px-8 pb-4 flex flex-col md:flex-row items-center justify-between border-b border-slate-800/50 gap-4">
                <div className="flex gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
@@ -435,6 +718,7 @@ function TransactionsPage() {
                             <th className="px-4 py-4">Categoria</th>
                             <th className="px-4 py-4">Status</th>
                             <th className="px-8 py-4 text-right">Valor</th>
+                            <th className="px-6 py-4 text-center">Ações</th>
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/30">
@@ -461,6 +745,31 @@ function TransactionsPage() {
                                 </td>
                                 <td className={`px-8 py-5 text-right font-bold text-sm ${tx.type === 'income' ? 'text-emerald-400' : 'text-rose-400'}`}>
                                   {tx.type === 'income' ? '+' : '-'} R$ {Math.abs(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="px-6 py-5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      onClick={() => {
+                                        setEditingTransaction(tx);
+                                        setIsEditOpen(true);
+                                      }}
+                                      className="h-8 w-8 text-slate-400 hover:text-indigo-400 hover:bg-slate-800/50 rounded-lg group"
+                                      id={`edit-btn-${tx.id}`}
+                                    >
+                                      <Pencil className="w-4 h-4 text-slate-400 group-hover:text-indigo-400 transition-colors" />
+                                    </Button>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      onClick={() => handleDeleteClick(tx.id)}
+                                      className="h-8 w-8 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg group"
+                                      id={`del-btn-${tx.id}`}
+                                    >
+                                      <Trash2 className="w-4 h-4 text-slate-400 group-hover:text-rose-500 transition-colors" />
+                                    </Button>
+                                  </div>
                                 </td>
                             </tr>
                           ))}

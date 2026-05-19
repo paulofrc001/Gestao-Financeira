@@ -38,10 +38,40 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!isSupabaseConfigured) {
-       toast.info('Modo demonstração: transação simulada.');
-       onOpenChange(false);
-       setStep(1);
-       form.reset();
+       try {
+         const INITIAL_DEMO_TRANSACTIONS = [
+           { id: 'tx-1', description: 'Supermercado Pão de Açúcar', date: '2026-05-18', amount: -452.90, category: 'alimentacao', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro' },
+           { id: 'tx-2', description: 'Assinatura Netflix Premium', date: '2026-05-15', amount: -55.90, category: 'lazer', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro', is_recurring: true },
+           { id: 'tx-3', description: 'Salário Paulo M.', date: '2026-05-05', amount: 8500.00, category: 'Salário', type: 'income', source: 'Itaú Recebimento', status: 'completed', emotion: 'Satisfeito' },
+           { id: 'tx-4', description: 'Condomínio e Aluguel', date: '2026-05-01', amount: -2300.00, category: 'moradia', type: 'expense', source: 'Itaú', status: 'completed', emotion: 'Preocupado' },
+           { id: 'tx-5', description: 'Combustível Posto Ipiranga', date: '2026-05-19', amount: -180.00, category: 'transporte', type: 'expense', source: 'Dinheiro', status: 'completed', emotion: 'Neutro' }
+         ];
+         const localSaved = localStorage.getItem('finna_transactions');
+         const txs = localSaved ? JSON.parse(localSaved) : INITIAL_DEMO_TRANSACTIONS;
+         const newTx = {
+           id: 'tx-' + Math.random().toString(36).substring(2, 9),
+           description: values.description,
+           amount: values.type === 'expense' ? -Math.abs(Number(values.amount)) : Math.abs(Number(values.amount)),
+           date: values.date,
+           type: values.type,
+           category: values.category,
+           emotion: values.emotion || 'Neutro',
+           is_impulse: values.isImpulse,
+           necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+           source: values.source || 'Manual',
+           status: 'completed'
+         };
+         
+         localStorage.setItem('finna_transactions', JSON.stringify([newTx, ...txs]));
+         toast.success('Transação registrada no modo demonstração!');
+         onOpenChange(false);
+         setStep(1);
+         form.reset();
+         // Trigger reload or refresh automatically
+         window.location.reload();
+       } catch (err: any) {
+         toast.error('Erro ao salvar no modo demonstração: ' + err.message);
+       }
        return;
     }
 

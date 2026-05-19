@@ -45,7 +45,7 @@ export function EmotionalRadarChart() {
   );
 }
 
-const data = [
+const defaultData = [
   { name: 'Jan', entrada: 4000, saida: 2400 },
   { name: 'Fev', entrada: 3000, saida: 1398 },
   { name: 'Mar', entrada: 2000, saida: 9800 },
@@ -53,7 +53,7 @@ const data = [
   { name: 'Mai', entrada: 8900, saida: 4320 },
 ];
 
-const pieData = [
+const defaultPieData = [
   { name: 'Moradia', value: 1200 },
   { name: 'Alimentação', value: 850 },
   { name: 'Lazer', value: 400 },
@@ -61,9 +61,9 @@ const pieData = [
   { name: 'Outros', value: 120 },
 ];
 
-const COLORS = ['#6366F1', '#4F46E5', '#312E81', '#1E1B4B', '#09090B'];
+const COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6', '#14B8A6'];
 
-export function MainFlowChart() {
+export function MainFlowChart({ data = defaultData }: { data?: { name: string; entrada: number; saida: number; }[] }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <div className="h-[300px] w-full bg-slate-900/10 animate-pulse rounded-2xl" />;
@@ -74,8 +74,8 @@ export function MainFlowChart() {
         <AreaChart data={data}>
           <defs>
             <linearGradient id="colorEntrada" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#6366F1" stopOpacity={0.3}/>
-              <stop offset="95%" stopColor="#6366F1" stopOpacity={0}/>
+              <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
+              <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
             </linearGradient>
             <linearGradient id="colorSaida" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#FB7185" stopOpacity={0.2}/>
@@ -108,7 +108,7 @@ export function MainFlowChart() {
           <Area 
             type="monotone" 
             dataKey="entrada" 
-            stroke="#6366F1" 
+            stroke="#10B981" 
             strokeWidth={3}
             fillOpacity={1} 
             fill="url(#colorEntrada)" 
@@ -127,7 +127,7 @@ export function MainFlowChart() {
   );
 }
 
-export function CategoriesPieChart() {
+export function CategoriesPieChart({ data = defaultPieData }: { data?: { name: string; value: number; }[] }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <div className="h-[200px] w-full bg-slate-900/10 animate-pulse rounded-full" />;
@@ -137,7 +137,7 @@ export function CategoriesPieChart() {
       <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
         <PieChart>
           <Pie
-            data={pieData}
+            data={data}
             cx="50%"
             cy="50%"
             innerRadius={60}
@@ -145,7 +145,7 @@ export function CategoriesPieChart() {
             paddingAngle={5}
             dataKey="value"
           >
-            {pieData.map((entry, index) => (
+            {data.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="#1E293B" strokeWidth={2} />
             ))}
           </Pie>
