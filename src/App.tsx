@@ -669,7 +669,19 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         onLogin();
       }
     } catch (err: any) {
-      setError(err.message || 'Erro na autenticação');
+      console.error(err);
+      let message = err.message || 'Erro na autenticação';
+      
+      if (err.status === 429 || message.includes('429')) {
+        message = 'Muitos acessos (Rate Limit). Aguarde 1 minuto.';
+      } else if (message.includes('apikey') || message.includes('No API key')) {
+        message = 'Erro de Chave API. Verifique sua ANON_KEY.';
+      } else if (message === 'Failed to fetch') {
+        message = 'Erro de conexão. Verifique sua URL.';
+      }
+      
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
