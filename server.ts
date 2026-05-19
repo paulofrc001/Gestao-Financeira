@@ -10,18 +10,32 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Gemini AI Setup
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
+// API Routes
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(), 
+    env: process.env.NODE_ENV,
+    hasGeminiKey: !!process.env.GEMINI_API_KEY 
+  });
 });
 
 // Helper for AI calls with retry
 async function generateWithRetry(params: any, retries = 3) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Chave GEMINI_API_KEY não encontrada no ambiente do servidor.');
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey: apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+
   for (let i = 0; i <= retries; i++) {
      try {
         if (!params.model) params.model = 'gemini-3-flash-preview';
@@ -45,11 +59,6 @@ async function generateWithRetry(params: any, retries = 3) {
      }
   }
 }
-
-// API Routes
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV });
-});
 
 app.post('/api/ai/insights', async (req, res) => {
   console.log('[API] Generating insights...');
@@ -79,6 +88,10 @@ app.post('/api/ai/insights', async (req, res) => {
 app.post('/api/ai/chat', async (req, res) => {
   try {
     const { message } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY missing');
+
+    const ai = new GoogleGenAI({ apiKey });
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview',
       config: {
