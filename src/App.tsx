@@ -772,6 +772,23 @@ function TransactionsPage() {
    };
 
    const executeDelete = async (id: string) => {
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    if (!isSupabaseConfigured || !isUUID) {
+      try {
+        const localSaved = localStorage.getItem('finna_transactions');
+        if (localSaved) {
+          const txs = JSON.parse(localSaved);
+          const filtered = txs.filter((t: any) => t.id !== id);
+          localStorage.setItem('finna_transactions', JSON.stringify(filtered));
+          setTransactions(filtered);
+          toast.success('Transação deletada (local/modo demonstração)');
+        }
+      } catch (err: any) {
+        toast.error('Erro ao deletar localmente: ' + err.message);
+      }
+      return;
+    }
+    if (false) {
      if (!isSupabaseConfigured) {
        try {
          const localSaved = localStorage.getItem('finna_transactions');
@@ -787,8 +804,9 @@ function TransactionsPage() {
        }
        return;
      }
+    }
 
-     try {
+    try {
        setLoading(true);
        const { error } = await supabase
          .from('transactions')

@@ -2,6 +2,11 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { format, addMonths, parseISO, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+export const isUUID = (id: any): boolean => {
+  if (typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
+
 export type AccountType = 'Checking' | 'Savings' | 'Investment' | 'Cash';
 
 export interface Account {
@@ -159,7 +164,7 @@ export async function saveAccount(account: Omit<Account, 'id'> & { id?: string }
     };
 
     let result;
-    if (account.id) {
+    if (account.id && isUUID(account.id)) {
       const { data, error } = await supabase
         .from('accounts')
         .update(payload)
@@ -194,7 +199,7 @@ export async function saveAccount(account: Omit<Account, 'id'> & { id?: string }
 
 // Delete Account
 export async function deleteAccount(id: string): Promise<void> {
-  if (!isSupabaseConfigured) {
+  if (!isSupabaseConfigured || !isUUID(id)) {
     const accounts = await getAccounts();
     const filtered = accounts.filter(a => a.id !== id);
     localStorage.setItem('finna_accounts', JSON.stringify(filtered));
@@ -265,8 +270,16 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
 
   try {
     const { data: { user } } = await supabase.auth.getUser();
+    
+    let finalAccountId = card.account_id;
+    if (!isUUID(finalAccountId)) {
+      const dbAccounts = await getAccounts();
+      const validAcc = dbAccounts.find(a => isUUID(a.id));
+      finalAccountId = validAcc ? validAcc.id : '';
+    }
+
     const payload: any = {
-      account_id: card.account_id,
+      account_id: finalAccountId || null,
       name: card.name,
       limit_amount: card.limit_amount,
       closing_day: card.closing_day,
@@ -276,12 +289,13 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
     };
 
     let result;
+    const hasValidCardId = card.id && isUUID(card.id);
     try {
-      if (card.id) {
+      if (hasValidCardId) {
         const { data, error } = await supabase
           .from('cards')
           .update(payload)
-          .eq('id', card.id)
+          .eq('id', card.id!)
           .select()
           .single();
         if (error) throw error;
@@ -300,11 +314,11 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
       if (insertErr && (insertErr.code === '42703' || String(insertErr.message).includes('user_id'))) {
         console.warn('Retrying card save without user_id column...');
         const { user_id, ...payloadWithoutUserId } = payload;
-        if (card.id) {
+        if (hasValidCardId) {
           const { data, error } = await supabase
             .from('cards')
             .update(payloadWithoutUserId)
-            .eq('id', card.id)
+            .eq('id', card.id!)
             .select()
             .single();
           if (error) throw error;
@@ -340,7 +354,7 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
 
 // Delete Card
 export async function deleteCard(id: string): Promise<void> {
-  if (!isSupabaseConfigured) {
+  if (!isSupabaseConfigured || !isUUID(id)) {
     const cards = await getCards();
     const filtered = cards.filter(c => c.id !== id);
     localStorage.setItem('finna_cards', JSON.stringify(filtered));
@@ -473,13 +487,13 @@ export async function payCreditCardInvoice(
       category: 'Outros',
       source: sourceAccount ? sourceAccount.name : 'Manual',
       status: 'completed',
-      account_id: sourceAccountId
+      account_id: isUUID(sourceAccountId) ? sourceAccountId : null
     });
 
     if (txError) throw txError;
 
     // Deduct checking account balance in database
-    if (sourceAccount) {
+    if (sourceAccount && isUUID(sourceAccountId)) {
       const { error: accError } = await supabase
         .from('accounts')
         .update({ balance: sourceAccount.balance - amount })
