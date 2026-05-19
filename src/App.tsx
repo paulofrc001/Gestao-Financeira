@@ -431,6 +431,7 @@ function TransactionsPage() {
                       <thead className="bg-[#09090B] text-[10px] uppercase font-bold text-slate-500 tracking-widest border-b border-slate-800/50">
                           <tr>
                             <th className="px-8 py-4">Fluxo</th>
+                            <th className="px-4 py-4">Origem</th>
                             <th className="px-4 py-4">Categoria</th>
                             <th className="px-4 py-4">Status</th>
                             <th className="px-8 py-4 text-right">Valor</th>
@@ -444,6 +445,11 @@ function TransactionsPage() {
                                       <span className="font-bold text-sm text-slate-100 italic transition-transform group-hover:translate-x-1 duration-300">{tx.description}</span>
                                       <span className="text-[10px] text-slate-500">{format(new Date(tx.date), "dd 'de' MMM", { locale: ptBR })}</span>
                                   </div>
+                                </td>
+                                <td className="px-4 py-5">
+                                  <Badge variant="outline" className="border-slate-800 text-[9px] text-indigo-400 capitalize font-bold italic">
+                                    {tx.source || 'Manual'}
+                                  </Badge>
                                 </td>
                                 <td className="px-4 py-5">
                                   <Badge className="bg-indigo-500/10 text-indigo-400 border-indigo-500/20 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider italic">{tx.category}</Badge>

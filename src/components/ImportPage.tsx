@@ -21,6 +21,7 @@ export default function ImportPage() {
   const [insights, setInsights] = useState<any>(null);
   const [isCreditCard, setIsCreditCard] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState('Principal');
+  const [customOrigin, setCustomOrigin] = useState('');
 
   const ACCOUNTS = [
     { id: '1', name: 'Nubank Principal', type: 'Checking' },
@@ -124,7 +125,8 @@ export default function ImportPage() {
         is_recurring: tx.isRecurring || false,
         installments: tx.installments || null,
         emotion: tx.suggestedEmotion || 'Neutro',
-        status: 'completed'
+        status: 'completed',
+        source: customOrigin || selectedAccount
       }));
 
       const { error } = await supabase.from('transactions').insert(txsToSave);
@@ -151,9 +153,15 @@ export default function ImportPage() {
             <h2 className="text-2xl font-bold text-slate-50 italic flex items-center gap-3">
               {isCreditCard ? <CreditCard className="text-indigo-400 w-7 h-7" /> : <FileUp className="text-indigo-400 w-7 h-7" />}
               Revisão de {isCreditCard ? 'Fatura' : 'Extrato'}
-              <Badge className="bg-indigo-600/20 text-indigo-400 border-indigo-600/30 ml-2 italic text-[10px] rounded-lg h-6">
-                Origem: {selectedAccount}
-              </Badge>
+              <div className="flex items-center gap-2 ml-4">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest italic">Origem:</span>
+                <Input 
+                  value={customOrigin} 
+                  onChange={(e) => setCustomOrigin(e.target.value)} 
+                  placeholder={selectedAccount}
+                  className="h-8 bg-slate-900/50 border-slate-800 text-[10px] w-40 rounded-lg focus:border-indigo-500 transition-all italic text-indigo-400 font-bold"
+                />
+              </div>
             </h2>
             <p className="text-slate-400 text-sm">Validando {transactions.length} transações identificadas pela FinnaAI.</p>
           </div>
@@ -199,6 +207,7 @@ export default function ImportPage() {
                     <thead className="bg-[#09090B] text-[10px] uppercase font-bold text-slate-500 tracking-widest border-b border-slate-800/50">
                        <tr>
                           <th className="px-6 py-4">Transação</th>
+                          <th className="px-4 py-4">Origem</th>
                           <th className="px-4 py-4">Categoria (IA)</th>
                           <th className="px-4 py-4">Fluxo</th>
                           <th className="px-6 py-4 text-right">Valor</th>
@@ -217,6 +226,11 @@ export default function ImportPage() {
                                     )}
                                   </div>
                                </div>
+                            </td>
+                            <td className="px-4 py-4">
+                               <Badge variant="outline" className="text-[9px] border-slate-800 text-indigo-400/70 italic font-bold">
+                                 {customOrigin || selectedAccount}
+                               </Badge>
                             </td>
                             <td className="px-4 py-4">
                                <Badge className="bg-indigo-500/10 text-indigo-400 border-indigo-500/20 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider italic">

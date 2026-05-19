@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Heart, Brain, AlertCircle, Save } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { toast } from 'sonner';
 
 const formSchema = z.object({
   description: z.string().min(2, { message: "Descrição muito curta" }),
@@ -17,24 +19,65 @@ const formSchema = z.object({
   date: z.string().min(1, { message: "Selecione uma data" }),
   type: z.enum(['income', 'expense', 'transfer']),
   emotion: z.string().optional(),
+  source: z.string().optional(),
   isImpulse: z.boolean().default(false),
   necessityLevel: z.string().optional(),
 });
 
 export default function NewTransactionDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
   const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
   const form = useForm<any>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       type: 'expense',
       isImpulse: false,
+      source: 'Manual'
     }
   });
 
-  const onSubmit = (values: z.infer<typeof formSchema>) => {
-    console.log(values);
-    onOpenChange(false);
-    setStep(1);
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (!isSupabaseConfigured) {
+       toast.info('Modo demonstração: transação simulada.');
+       onOpenChange(false);
+       setStep(1);
+       form.reset();
+       return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      const { error } = await supabase.from('transactions').insert({
+        user_id: user.id,
+        description: values.description,
+        amount: values.type === 'expense' ? -Math.abs(Number(values.amount)) : Math.abs(Number(values.amount)),
+        date: values.date,
+        type: values.type,
+        category: values.category,
+        emotion: values.emotion || 'Neutro',
+        is_impulse: values.isImpulse,
+        necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+        source: values.source || 'Manual',
+        status: 'completed'
+      });
+
+      if (error) throw error;
+      
+      toast.success('Transação registrada com sucesso!');
+      onOpenChange(false);
+      setStep(1);
+      form.reset();
+      // Reload page to see new data (simple way)
+      window.location.reload();
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Erro ao salvar: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -81,6 +124,11 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
                     <Label htmlFor="date" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Data do fluxo</Label>
                     <Input id="date" type="date" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 text-slate-100 focus:border-indigo-500" {...form.register('date')} />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="source" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Origem / Conta</Label>
+                  <Input id="source" placeholder="Ex: Dinheiro, Nubank, Itaú" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" {...form.register('source')} />
                 </div>
 
                 <div className="space-y-2">
@@ -178,10 +226,11 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
                   </Button>
                   <Button 
                     type="submit" 
-                    className="flex-2 rounded-2xl h-12 bg-emerald-600 hover:bg-emerald-700 font-bold text-white shadow-xl shadow-emerald-600/10 transition-all"
+                    disabled={loading}
+                    className="flex-2 rounded-2xl h-12 bg-emerald-600 hover:bg-emerald-700 font-bold text-white shadow-xl shadow-emerald-600/10 transition-all disabled:opacity-50"
                   >
                     <Save className="w-4 h-4 mr-2" />
-                    Salvar Dados
+                    {loading ? 'Salvando...' : 'Salvar Dados'}
                   </Button>
                </div>
             </div>

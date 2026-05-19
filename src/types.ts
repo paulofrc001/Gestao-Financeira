@@ -60,6 +60,7 @@ export interface Transaction {
   status: 'pending' | 'completed';
   is_recurring: boolean;
   recurrence_period?: string;
+  source?: string;
   
   // Emotional Data
   emotion?: string;
