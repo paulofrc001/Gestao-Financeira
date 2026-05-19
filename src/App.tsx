@@ -3,24 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
-import { Toaster } from 'sonner';
-import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Toaster, toast } from 'sonner';
+import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Transaction } from './types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 // Navigation items
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'transactions', label: 'Transações', icon: ReceiptText },
+  { id: 'import', label: 'Importação', icon: FileUp },
   { id: 'goals', label: 'Metas', icon: Target },
   { id: 'accounts', label: 'Contas', icon: Wallet },
   { id: 'insights', label: 'IA Insights', icon: BrainCircuit },
@@ -31,11 +34,17 @@ const NAV_ITEMS = [
 import { Input } from '@/components/ui/input';
 import { MainFlowChart, CategoriesPieChart, EmotionalRadarChart } from './components/Charts';
 import NewTransactionDialog from './components/NewTransactionDialog';
+import ImportPage from './components/ImportPage';
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isNewTxOpen, setIsNewTxOpen] = useState(false);
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#09090B] text-slate-50 font-sans">
@@ -117,8 +126,9 @@ export default function App() {
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'transactions' && <TransactionsPage />}
         {activeTab === 'insights' && <InsightsPage />}
+        {activeTab === 'import' && <ImportPage />}
         {activeTab === 'emotional' && <EmotionalPage />}
-        {activeTab !== 'dashboard' && activeTab !== 'transactions' && activeTab !== 'insights' && activeTab !== 'emotional' && (
+        {activeTab !== 'dashboard' && activeTab !== 'transactions' && activeTab !== 'insights' && activeTab !== 'emotional' && activeTab !== 'import' && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
              <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mb-4 border border-slate-800">
                 <Settings className="text-slate-500 w-8 h-8" />
@@ -133,14 +143,54 @@ export default function App() {
 }
 
 function Dashboard() {
+  const [stats, setStats] = useState({ balance: 0, income: 0, expense: 0, recent: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      if (!isSupabaseConfigured) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .order('date', { ascending: false });
+
+        if (error) throw error;
+
+        if (data) {
+          const income = data.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.amount), 0);
+          const expense = data.filter(t => t.type === 'expense').reduce((acc, t) => acc + Math.abs(Number(t.amount)), 0);
+          setStats({
+            balance: income - expense,
+            income,
+            expense,
+            recent: data.slice(0, 4)
+          });
+        }
+      } catch (err: any) {
+        console.error(err);
+        if (err.message === 'Failed to fetch') {
+          toast.error('Não foi possível conectar ao Supabase. Verifique suas configurações.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in fade-in duration-700">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Saldo em Contas" value="R$ 12.450,00" change="+2.4%" icon={Wallet} trend="up" />
-        <StatCard title="Receitas (Maio)" value="R$ 8.900,00" change="+12%" icon={TrendingUp} trend="up" color="green" />
-        <StatCard title="Despesas (Maio)" value="R$ 4.320,00" change="-5%" icon={TrendingDown} trend="down" color="red" />
-        <StatCard title="Economia do Mês" value="R$ 4.580,00" change="51%" icon={DollarSign} trend="up" color="blue" subtitle="da meta mensal" />
+        <StatCard title="Saldo em Contas" value={loading ? "..." : `R$ ${stats.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={Wallet} trend="up" />
+        <StatCard title="Receitas Mensais" value={loading ? "..." : `R$ ${stats.income.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={TrendingUp} trend="up" color="green" />
+        <StatCard title="Despesas Mensais" value={loading ? "..." : `R$ ${stats.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={TrendingDown} trend="down" color="red" />
+        <StatCard title="Economia do Mês" value={loading ? "..." : `R$ ${(stats.income - stats.expense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="0%" icon={DollarSign} trend="up" color="blue" subtitle="da meta mensal" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -178,33 +228,49 @@ function Dashboard() {
 
       {/* Second Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         <Card className="border-[#E5E5E5] shadow-none rounded-3xl">
-            <CardHeader className="px-8 py-6 flex flex-row items-center justify-between">
-              <CardTitle className="text-lg font-bold">Últimas Transações</CardTitle>
-              <Button variant="link" className="text-[#1A1A1A] font-bold text-sm">Ver todas</Button>
+         <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl overflow-hidden">
+            <CardHeader className="px-8 py-6 flex flex-row items-center justify-between border-b border-slate-800/50">
+              <CardTitle className="text-lg font-bold text-slate-50">Últimas Transações</CardTitle>
+              <Button variant="link" className="text-indigo-400 font-bold text-sm">Ver todas</Button>
             </CardHeader>
-            <CardContent className="px-8 pb-8">
+            <CardContent className="px-8 py-6">
                <div className="space-y-4">
-                  <TransactionItem title="Supermercado Extra" date="Hoje, 14:20" amount="- R$ 342,00" category="Alimentação" type="expense" />
-                  <TransactionItem title="Salário Paulo" date="Ontem, 09:00" amount="+ R$ 6.500,00" category="Renda" type="income" />
-                  <TransactionItem title="Assinatura Netflix" date="15 Mai 2026" amount="- R$ 55,90" category="Lazer" type="expense" />
-                  <TransactionItem title="Posto Shell" date="14 Mai 2026" amount="- R$ 220,00" category="Transporte" type="expense" />
+                  {loading ? (
+                    <div className="py-10 text-center text-slate-500">Caregando...</div>
+                  ) : stats.recent.length > 0 ? (
+                    stats.recent.map((tx: any) => (
+                      <TransactionItem 
+                        key={tx.id}
+                        title={tx.description} 
+                        date={format(new Date(tx.date), "dd MMM", { locale: ptBR })} 
+                        amount={`${tx.type === 'income' ? '+' : '-'} R$ ${Math.abs(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} 
+                        category={tx.category} 
+                        type={tx.type} 
+                      />
+                    ))
+                  ) : (
+                    <div className="py-10 text-center text-slate-500 italic">Nenhuma transação registrada.</div>
+                  )}
                </div>
             </CardContent>
          </Card>
 
-         <Card className="bg-[#1A1A1A] border-none shadow-none rounded-3xl text-white overflow-hidden relative">
+         <Card className="bg-indigo-600 border-none shadow-none rounded-3xl text-white overflow-hidden relative shadow-2xl shadow-indigo-600/20">
             <div className="absolute top-0 right-0 p-8 opacity-10">
                <BrainCircuit className="w-32 h-32" />
             </div>
             <CardHeader className="px-8 pt-8">
                <Badge className="bg-white/10 text-white border-white/20 hover:bg-white/20 mb-4 w-fit">IA Insight</Badge>
-               <CardTitle className="text-2xl font-bold leading-tight">Você economizou 15% a mais que no último mês!</CardTitle>
+               <CardTitle className="text-2xl font-bold leading-tight">Sugestão Finna Neural</CardTitle>
             </CardHeader>
             <CardContent className="px-8 pb-8 pt-4">
-               <p className="text-white/70 mb-6 leading-relaxed">Sua família reduziu gastos impulsivos em 'Lazer' após as 22h. Continue assim para atingir a meta da Viagem em Agosto.</p>
+               <p className="text-white/70 mb-6 leading-relaxed italic">
+                 {stats.balance > 0 
+                   ? "Você possui saldo positivo! Que tal direcionar 20% para sua meta de investimento?" 
+                   : "Suas despesas superaram as receitas. Use nossa ferramenta de importação para identificar desperdícios."}
+               </p>
                <div className="flex gap-4">
-                  <Button className="bg-white text-[#1A1A1A] hover:bg-white/90 rounded-full font-bold">Ver Sugestões</Button>
+                  <Button className="bg-white text-indigo-600 hover:bg-white/90 rounded-xl font-bold h-11 px-6">Ver Sugestões</Button>
                </div>
             </CardContent>
          </Card>
@@ -276,50 +342,132 @@ function SelectMonth() {
 }
 
 function TransactionsPage() {
+   const [filter, setFilter] = useState<'all' | 'expense' | 'income'>('all');
+   const [search, setSearch] = useState('');
+   const [transactions, setTransactions] = useState<any[]>([]);
+   const [loading, setLoading] = useState(true);
+
+   useEffect(() => {
+     fetchTransactions();
+   }, []);
+
+   const fetchTransactions = async () => {
+     setLoading(true);
+     if (!isSupabaseConfigured) {
+       setLoading(false);
+       return;
+     }
+     try {
+       const { data, error } = await supabase
+         .from('transactions')
+         .select('*')
+         .order('date', { ascending: false });
+       
+       if (error) throw error;
+       setTransactions(data || []);
+     } catch (err: any) {
+       console.error(err);
+       toast.error('Erro ao carregar transações: ' + (err.message === 'Failed to fetch' ? 'Erro de conexão' : err.message));
+     } finally {
+       setLoading(false);
+     }
+   };
+
+   const filteredTransactions = transactions.filter(tx => {
+      const matchesFilter = filter === 'all' || tx.type === filter;
+      const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) || 
+                           tx.category.toLowerCase().includes(search.toLowerCase());
+      return matchesFilter && matchesSearch;
+   });
+
    return (
       <div className="space-y-6">
          <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl pt-6">
-            <div className="px-8 pb-4 flex items-center justify-between border-b border-slate-800/50">
-               <div className="flex gap-4">
-                  <Button variant="secondary" className="bg-indigo-600 text-white rounded-full px-6 hover:bg-indigo-700">Todos</Button>
-                  <Button variant="ghost" className="rounded-full text-slate-400 hover:text-white">Despesas</Button>
-                  <Button variant="ghost" className="rounded-full text-slate-400 hover:text-white">Receitas</Button>
+            <div className="px-8 pb-4 flex flex-col md:flex-row items-center justify-between border-b border-slate-800/50 gap-4">
+               <div className="flex gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setFilter('all')}
+                    className={`rounded-lg px-6 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${filter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-200'}`}
+                  >
+                    Todos
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setFilter('expense')}
+                    className={`rounded-lg px-6 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${filter === 'expense' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-200'}`}
+                  >
+                    Despesas
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setFilter('income')}
+                    className={`rounded-lg px-6 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${filter === 'income' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-200'}`}
+                  >
+                    Receitas
+                  </Button>
                </div>
-               <div className="flex gap-2">
-                  <Input placeholder="Buscar transação..." className="w-64 rounded-xl border-slate-800 bg-slate-900/50 text-slate-200" />
+               <div className="relative w-full md:w-64 group">
+                  <Input 
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar transação..." 
+                    className="rounded-xl border-slate-800 bg-slate-900/50 text-slate-200 h-11 pl-10 focus:border-indigo-500 transition-all" 
+                  />
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-500 transition-colors">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  </div>
                </div>
             </div>
             <CardContent className="p-0">
-               <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                     <thead className="bg-[#09090B] text-[10px] uppercase font-bold text-slate-500 tracking-widest border-b border-slate-800/50">
-                        <tr>
-                           <th className="px-8 py-4">Descrição</th>
-                           <th className="px-4 py-4">Categoria</th>
-                           <th className="px-4 py-4">Status</th>
-                           <th className="px-4 py-4 text-right">Valor</th>
-                        </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-800/30">
-                        {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-                           <tr key={i} className="hover:bg-slate-800/20 transition-colors group">
-                              <td className="px-8 py-5">
-                                 <div className="flex flex-col">
-                                    <span className="font-bold text-sm text-slate-100 italic">Supermercado Zandona {i}</span>
-                                    <span className="text-[10px] text-slate-500">1{i} Mai, 10:30</span>
-                                 </div>
-                              </td>
-                              <td className="px-4 py-5">
-                                 <Badge className="bg-indigo-500/10 text-indigo-400 border-indigo-500/20 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider italic">Alimentação</Badge>
-                              </td>
-                              <td className="px-4 py-5">
-                                 <Badge className="bg-emerald-500/10 text-emerald-400 border-none px-2 py-0.5 rounded-full text-[9px] uppercase font-bold tracking-wider">Concluído</Badge>
-                              </td>
-                              <td className="px-4 py-5 text-right font-bold text-sm text-rose-400">- R$ 145,90</td>
-                           </tr>
-                        ))}
-                     </tbody>
-                  </table>
+               <div className="overflow-x-auto min-h-[400px]">
+                  {loading ? (
+                    <div className="flex flex-col items-center justify-center py-32 text-center">
+                       <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
+                       <p className="text-slate-500 text-sm italic">Sincronizando com Supabase...</p>
+                    </div>
+                  ) : filteredTransactions.length > 0 ? (
+                    <table className="w-full text-left">
+                      <thead className="bg-[#09090B] text-[10px] uppercase font-bold text-slate-500 tracking-widest border-b border-slate-800/50">
+                          <tr>
+                            <th className="px-8 py-4">Fluxo</th>
+                            <th className="px-4 py-4">Categoria</th>
+                            <th className="px-4 py-4">Status</th>
+                            <th className="px-8 py-4 text-right">Valor</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/30">
+                          {filteredTransactions.map((tx) => (
+                            <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors group">
+                                <td className="px-8 py-5">
+                                  <div className="flex flex-col">
+                                      <span className="font-bold text-sm text-slate-100 italic transition-transform group-hover:translate-x-1 duration-300">{tx.description}</span>
+                                      <span className="text-[10px] text-slate-500">{format(new Date(tx.date), "dd 'de' MMM", { locale: ptBR })}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-5">
+                                  <Badge className="bg-indigo-500/10 text-indigo-400 border-indigo-500/20 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider italic">{tx.category}</Badge>
+                                </td>
+                                <td className="px-4 py-5">
+                                  <Badge className={`border-none px-2 py-0.5 rounded-full text-[9px] uppercase font-bold tracking-wider ${tx.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                    {tx.status === 'completed' ? 'Concluído' : 'Pendente'}
+                                  </Badge>
+                                </td>
+                                <td className={`px-8 py-5 text-right font-bold text-sm ${tx.type === 'income' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {tx.type === 'income' ? '+' : '-'} R$ {Math.abs(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-32 text-center">
+                       <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center mb-4 border border-slate-800">
+                          <ReceiptText className="text-slate-700 w-6 h-6" />
+                       </div>
+                       <p className="text-slate-500 text-sm italic">Nenhuma transação encontrada para sua busca.</p>
+                    </div>
+                  )}
                </div>
             </CardContent>
          </Card>
@@ -431,54 +579,171 @@ function EmotionalPage() {
    return (
       <div className="space-y-8">
          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="border-[#E5E5E5] shadow-none rounded-2xl p-6 bg-gradient-to-br from-white to-orange-50/30">
-               <h4 className="text-xs font-bold text-[#999999] uppercase tracking-widest mb-2">Pulsão de Consumo</h4>
-               <p className="text-3xl font-bold mb-2">42%</p>
-               <p className="text-[10px] text-orange-600 font-bold leading-tight uppercase tracking-wider">Sinal Amarelo: Gastos impulsivos em alta este fim de semana.</p>
+            <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-2xl p-6 bg-gradient-to-br from-indigo-500/5 to-transparent">
+               <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 italic">Pulsão de Consumo</h4>
+               <p className="text-3xl font-bold mb-2 text-slate-50">42%</p>
+               <p className="text-[10px] text-amber-400 font-bold leading-tight uppercase tracking-wider">Alerta: Gastos impulsivos em alta neste fim de semana.</p>
             </Card>
-            <Card className="border-[#E5E5E5] shadow-none rounded-2xl p-6 bg-gradient-to-br from-white to-green-50/30">
-               <h4 className="text-xs font-bold text-[#999999] uppercase tracking-widest mb-2">Felicidade Financeira</h4>
-               <p className="text-3xl font-bold mb-2">85%</p>
-               <p className="text-[10px] text-green-600 font-bold leading-tight uppercase tracking-wider">Meta Concluída: Sua família está satisfeita com as conquistas atuais.</p>
+            <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-2xl p-6 bg-gradient-to-br from-emerald-500/5 to-transparent">
+               <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 italic">Felicidade Financeira</h4>
+               <p className="text-3xl font-bold mb-2 text-slate-50">85%</p>
+               <p className="text-[10px] text-emerald-400 font-bold leading-tight uppercase tracking-wider italic">Meta Concluída: Sua família está satisfeita com as conquistas.</p>
             </Card>
-            <Card className="border-[#E5E5E5] shadow-none rounded-2xl p-6 bg-gradient-to-br from-white to-red-50/30">
-               <h4 className="text-xs font-bold text-[#999999] uppercase tracking-widest mb-2">Indice de Arrependimento</h4>
-               <p className="text-3xl font-bold mb-2">12%</p>
-               <p className="text-[10px] text-red-600 font-bold leading-tight uppercase tracking-wider">Baixo: Poucos gastos após as 22h geraram desconforto.</p>
+            <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-2xl p-6 bg-gradient-to-br from-rose-500/5 to-transparent">
+               <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 italic">Indice de Arrependimento</h4>
+               <p className="text-3xl font-bold mb-2 text-slate-50">12%</p>
+               <p className="text-[10px] text-rose-400 font-bold leading-tight uppercase tracking-wider">Baixo: Controle emocional estável nas últimas 48h.</p>
             </Card>
          </div>
 
          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <Card className="lg:col-span-2 border-[#E5E5E5] shadow-none rounded-3xl p-8">
-               <CardTitle className="text-xl font-bold mb-6">Mapa Emocional de Gastos</CardTitle>
+            <Card className="lg:col-span-2 bg-slate-900/40 border-slate-800 shadow-none rounded-3xl p-8">
+               <CardTitle className="text-xl font-bold mb-6 text-slate-100 italic">Mapa Emocional de Gastos</CardTitle>
                <EmotionalRadarChart />
             </Card>
 
             <div className="space-y-6">
-               <Card className="border-[#E5E5E5] shadow-none rounded-3xl p-6">
-                  <CardTitle className="text-sm font-bold mb-4">Gatilhos Críticos</CardTitle>
+               <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl p-6">
+                  <CardTitle className="text-sm font-bold mb-4 text-slate-100">Gatilhos Críticos</CardTitle>
                   <div className="space-y-4">
                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium">Noite de Sexta</span>
-                        <Badge className="bg-orange-100 text-orange-700 font-bold text-[8px]">Alto Risco</Badge>
+                        <span className="text-xs font-medium text-slate-400">Noite de Sexta</span>
+                        <Badge className="bg-rose-500/10 text-rose-400 border-rose-500/20 font-bold text-[8px] uppercase tracking-widest">Alto Risco</Badge>
                      </div>
                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium">Apps de Delivery</span>
-                        <Badge className="bg-orange-100 text-orange-700 font-bold text-[8px]">Moderado</Badge>
+                        <span className="text-xs font-medium text-slate-400">Apps de Delivery</span>
+                        <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 font-bold text-[8px] uppercase tracking-widest">Moderado</Badge>
                      </div>
                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium">Shopping Centers</span>
-                        <Badge className="bg-red-100 text-red-700 font-bold text-[8px]">Extremo</Badge>
+                        <span className="text-xs font-medium text-slate-400">Shopping Centers</span>
+                        <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-bold text-[8px] uppercase tracking-widest">Estável</Badge>
                      </div>
                   </div>
                </Card>
 
-               <Button className="w-full bg-[#1A1A1A] text-white rounded-2xl py-6 h-auto flex flex-col gap-1 items-center justify-center hover:scale-[1.02] transition-transform">
-                  <span className="font-bold">Log de Gastos do Pulsão</span>
-                  <span className="text-[10px] opacity-60 font-medium">Registre como você se sente agora</span>
+               <Button className="w-full bg-indigo-600 text-white rounded-2xl py-6 h-auto flex flex-col gap-1 items-center justify-center hover:scale-[1.02] transition-transform shadow-xl shadow-indigo-600/20 group">
+                  <span className="font-bold flex items-center gap-2">
+                     Log de Gastos Sensorial
+                     <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" />
+                  </span>
+                  <span className="text-[10px] opacity-60 font-medium uppercase tracking-widest">Registre suas emoções</span>
                </Button>
             </div>
          </div>
       </div>
    )
 }
+
+function LoginPage({ onLogin }: { onLogin: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) onLogin();
+    });
+  }, [onLogin]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        toast.success('Conta criada! Verifique seu email.');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        onLogin();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Erro na autenticação');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#09090B] flex items-center justify-center p-4 font-sans">
+      <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
+        <div className="text-center space-y-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-600/20 mb-4">
+            <TrendingUp className="text-white w-8 h-8" />
+          </div>
+          <h1 className="text-4xl font-bold tracking-tighter text-white italic">Finna<span className="text-indigo-500">AI</span></h1>
+          <p className="text-slate-400 text-sm font-medium uppercase tracking-[0.2em]">Gestão Financeira de Elite</p>
+        </div>
+
+        <Card className="bg-slate-900/40 border-slate-800 shadow-2xl rounded-3xl overflow-hidden backdrop-blur-xl">
+          <CardHeader className="pt-8 px-8 pb-4">
+            <CardTitle className="text-xl font-bold text-slate-100 italic">
+              {isSignUp ? 'Criar nova conta' : 'Bem-vindo de volta'}
+            </CardTitle>
+            <CardDescription className="text-slate-500">
+              {isSignUp ? 'Comece sua jornada financeira com IA.' : 'Acesse o comando central da sua família.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-8 pt-0">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Email</Label>
+                  <Input 
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="seu@email.com" 
+                    className="rounded-xl border-slate-800 bg-slate-900/50 h-12 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" 
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Senha</Label>
+                  <Input 
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••" 
+                    className="rounded-xl border-slate-800 bg-slate-900/50 h-12 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" 
+                    required
+                  />
+                </div>
+              </div>
+
+              {error && <p className="text-rose-500 text-[10px] font-bold uppercase tracking-wider text-center animate-shake">{error}</p>}
+
+              <Button 
+                type="submit" 
+                disabled={loading}
+                className="w-full rounded-2xl h-12 bg-indigo-600 hover:bg-indigo-700 font-bold transition-all shadow-xl shadow-indigo-600/20 text-white group"
+              >
+                {loading ? 'Processando...' : isSignUp ? 'Criar Conta' : 'Iniciar Sessão Segura'}
+                {!loading && <ChevronRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />}
+              </Button>
+
+              <div className="text-center">
+                <button 
+                  type="button"
+                  onClick={() => setIsSignUp(!isSignUp)}
+                  className="text-[10px] text-slate-400 uppercase tracking-widest font-bold hover:text-indigo-400 transition-colors"
+                >
+                  {isSignUp ? 'Já tem uma conta? Entrar' : 'Não tem conta? Cadastre-se'}
+                </button>
+              </div>
+            </form>
+          </CardContent>
+          <div className="px-8 pb-8 text-center border-t border-slate-800/50 pt-6 bg-slate-900/20">
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-medium">Conexão Segura Supabase SSL</p>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+

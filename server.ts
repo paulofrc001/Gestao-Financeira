@@ -10,7 +10,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // Gemini AI Setup
   const ai = new GoogleGenAI({
@@ -22,6 +23,24 @@ async function startServer() {
     }
   });
 
+  // Helper for AI calls with retry
+  async function generateWithRetry(params: any, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+       try {
+          return await ai.models.generateContent(params);
+       } catch (error: any) {
+          if (i === retries) throw error;
+          const isRetryable = error.message.includes('503') || error.message.includes('overloaded') || error.message.includes('high demand');
+          if (isRetryable) {
+             console.log(`AI high demand, retrying... (${i + 1}/${retries})`);
+             await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential-ish backoff
+             continue;
+          }
+          throw error;
+       }
+    }
+  }
+
   // API Routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -32,6 +51,10 @@ async function startServer() {
     try {
       const { transactions, goals } = req.body;
       
+      if (!transactions) {
+        return res.status(400).json({ error: 'Faltando transações para análise' });
+      }
+
       const prompt = `
         Aja como um consultor financeiro familiar especialista. 
         Analise as seguintes transações e metas:
@@ -50,8 +73,8 @@ async function startServer() {
         }
       `;
 
-      const result = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+      const result = await generateWithRetry({
+        model: 'gemini-flash-latest',
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
@@ -70,15 +93,92 @@ async function startServer() {
     try {
       const { message, history } = req.body;
       const chat = ai.chats.create({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-flash-latest',
         config: {
           systemInstruction: 'Você é o Finna, um assistente de gestão financeira familiar. Seja educado, profissional e ajude a família a economizar e ter controle emocional sobre o dinheiro.'
         }
       });
 
-      const response = await chat.sendMessage({ message });
+      // Simple retry for chat
+      let response;
+      for (let i = 0; i <= 2; i++) {
+        try {
+          response = await chat.sendMessage({ message });
+          break;
+        } catch (error: any) {
+          if (i === 2) throw error;
+          const isRetryable = error.message.includes('503') || error.message.includes('overloaded') || error.message.includes('high demand');
+          if (isRetryable) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+            continue;
+          }
+          throw error;
+        }
+      }
+      
+      if (!response) throw new Error('No response from AI');
       res.json({ text: response.text });
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Endpoint for Statement Parsing
+  app.post('/api/ai/parse-statement', async (req, res) => {
+    try {
+      const { text, fileType } = req.body;
+      
+      const prompt = `
+        Aja como um extrator de dados financeiros de alto nível e analista preditivo.
+        Analise o texto abaixo extraído de um arquivo ${fileType}. Pode ser um extrato bancário ou uma fatura de CARTÃO DE CRÉDITO.
+        
+        TAREFAS:
+        1. Extraia todas as transações possíveis.
+        2. Identifique se o documento é uma FATURA DE CARTÃO DE CRÉDITO.
+        3. Para cada transação: data (YYYY-MM-DD), descrição, valor (negativo para gastos), categoria, isSubscription, isRecurring.
+        4. Categorização automática baseada em padrões.
+        5. PREVISÃO: Se for cartão, identifique parcelamentos (ex: "Compra X 1/10") e projete gastos futuros.
+        6. IA INSIGHTS: Identifique desperdícios, assinaturas duplicadas e sugira cortes.
+
+        Texto do documento:
+        ${text}
+        
+        Responda APENAS em formato JSON:
+        {
+          "isCreditCard": Boolean,
+          "transactions": [
+            {
+              "date": "YYYY-MM-DD",
+              "description": "String",
+              "amount": Number,
+              "category": "String",
+              "isSubscription": Boolean,
+              "isRecurring": Boolean,
+              "installments": "String (ex: '1/5') ou null",
+              "suggestedEmotion": "String"
+            }
+          ],
+          "insights": {
+             "wastes": ["String"],
+             "totalCurrentStatement": Number,
+             "forecastNextMonth": Number,
+             "futureInstallmentsTotal": Number,
+             "analysis": "String curta com tom de advisor financeiro"
+          }
+        }
+      `;
+
+      const result = await generateWithRetry({
+        model: 'gemini-flash-latest',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json'
+        }
+      });
+      
+      res.json(JSON.parse(result.text || '{}'));
+    } catch (error: any) {
+      console.error('Statement Parse Error:', error);
       res.status(500).json({ error: error.message });
     }
   });
