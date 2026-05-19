@@ -222,8 +222,8 @@ DROP POLICY IF EXISTS "member_access_family_members" ON family_members;
 CREATE POLICY "member_access_family_members" ON family_members
   FOR ALL TO authenticated
   USING (
-    family_id IN (SELECT id FROM families WHERE creator_id = auth.uid()) OR
-    family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+    user_id = auth.uid() OR
+    family_id IN (SELECT id FROM families WHERE creator_id = auth.uid())
   );
 
 -- ACCOUNTS policies
