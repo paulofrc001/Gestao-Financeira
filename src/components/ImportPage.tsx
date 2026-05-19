@@ -12,6 +12,8 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useGemini } from '../hooks/useGemini';
+import LoadingState from './LoadingState';
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,6 +24,8 @@ export default function ImportPage() {
   const [isCreditCard, setIsCreditCard] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState('Principal');
   const [customOrigin, setCustomOrigin] = useState('');
+
+  const { parseStatement, loading: aiLoading, error: aiError } = useGemini();
 
   const ACCOUNTS = [
     { id: '1', name: 'Nubank Principal', type: 'Checking' },
@@ -59,21 +63,15 @@ export default function ImportPage() {
             return;
           }
 
-          const res = await fetch('/api/ai/parse-statement', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              text: text.slice(0, 15000), // Increased slice for more context
-              fileType: file.name.split('.').pop() 
-            })
-          });
-          
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.error || `Erro do servidor (${res.status})`);
+          // Safe call using our robust useGemini hook
+          const fileExtension = file.name.split('.').pop() || 'txt';
+          const data = await parseStatement(text.slice(0, 15000), fileExtension);
+
+          if (!data) {
+            // Error is handled inside the hook (aiError contain the error string)
+            throw new Error(aiError || 'Erro na decodificação do documento financeiro por IA.');
           }
 
-          const data = await res.json();
           setTransactions(data.transactions || []);
           setInsights(data.insights || null);
           setIsCreditCard(data.isCreditCard || false);
@@ -144,6 +142,26 @@ export default function ImportPage() {
       setParsing(false);
     }
   };
+
+  if (aiLoading) {
+    return (
+      <LoadingState 
+        variant="fullscreen" 
+        message="Análise Neural Ativa..." 
+        subMessage="Nosso algoritmo Finna está limpando as descrições, identificando recorrências ocultas e projetando parcelas futuras de cartão..."
+      />
+    );
+  }
+
+  if (parsing) {
+    return (
+      <LoadingState 
+        variant="fullscreen" 
+        message="Gravando Transações..." 
+        subMessage="Sincronizando com seu banco de dados de alta performance..."
+      />
+    );
+  }
 
   if (step === 'review') {
     return (

@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Heart, Brain, AlertCircle, Save } from 'lucide-react';
+import { Heart, AlertCircle, Save } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { toast } from 'sonner';
+import { getAccounts, getCards, Account, Card as CreditCardType, saveAccount } from '../lib/accountsCardsStore';
+import { addMonths, format, parseISO } from 'date-fns';
 
 const formSchema = z.object({
   description: z.string().min(2, { message: "Descrição muito curta" }),
@@ -27,80 +28,211 @@ const formSchema = z.object({
 export default function NewTransactionDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  
+  // Accounts and Credit Cards resources
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [cards, setCards] = useState<CreditCardType[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<'account' | 'card'>('account');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedCardId, setSelectedCardId] = useState<string>('');
+  const [installments, setInstallments] = useState<number>(1);
+
   const form = useForm<any>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       type: 'expense',
       isImpulse: false,
-      source: 'Manual'
+      source: 'Manual',
+      emotion: 'Neutro',
+      necessityLevel: '3'
     }
   });
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    if (!isSupabaseConfigured) {
-       try {
-         const INITIAL_DEMO_TRANSACTIONS = [
-           { id: 'tx-1', description: 'Supermercado Pão de Açúcar', date: '2026-05-18', amount: -452.90, category: 'alimentacao', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro' },
-           { id: 'tx-2', description: 'Assinatura Netflix Premium', date: '2026-05-15', amount: -55.90, category: 'lazer', type: 'expense', source: 'Nubank Principal', status: 'completed', emotion: 'Neutro', is_recurring: true },
-           { id: 'tx-3', description: 'Salário Paulo M.', date: '2026-05-05', amount: 8500.00, category: 'Salário', type: 'income', source: 'Itaú Recebimento', status: 'completed', emotion: 'Satisfeito' },
-           { id: 'tx-4', description: 'Condomínio e Aluguel', date: '2026-05-01', amount: -2300.00, category: 'moradia', type: 'expense', source: 'Itaú', status: 'completed', emotion: 'Preocupado' },
-           { id: 'tx-5', description: 'Combustível Posto Ipiranga', date: '2026-05-19', amount: -180.00, category: 'transporte', type: 'expense', source: 'Dinheiro', status: 'completed', emotion: 'Neutro' }
-         ];
-         const localSaved = localStorage.getItem('finna_transactions');
-         const txs = localSaved ? JSON.parse(localSaved) : INITIAL_DEMO_TRANSACTIONS;
-         const newTx = {
-           id: 'tx-' + Math.random().toString(36).substring(2, 9),
-           description: values.description,
-           amount: values.type === 'expense' ? -Math.abs(Number(values.amount)) : Math.abs(Number(values.amount)),
-           date: values.date,
-           type: values.type,
-           category: values.category,
-           emotion: values.emotion || 'Neutro',
-           is_impulse: values.isImpulse,
-           necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
-           source: values.source || 'Manual',
-           status: 'completed'
-         };
-         
-         localStorage.setItem('finna_transactions', JSON.stringify([newTx, ...txs]));
-         toast.success('Transação registrada no modo demonstração!');
-         onOpenChange(false);
-         setStep(1);
-         form.reset();
-         // Trigger reload or refresh automatically
-         window.location.reload();
-       } catch (err: any) {
-         toast.error('Erro ao salvar no modo demonstração: ' + err.message);
-       }
-       return;
+  // Load resources
+  useEffect(() => {
+    if (open) {
+      const loadOptions = async () => {
+        try {
+          const accs = await getAccounts();
+          const crds = await getCards();
+          setAccounts(accs);
+          setCards(crds);
+          
+          if (accs.length > 0) {
+            setSelectedAccountId(accs[0].id);
+          }
+          if (crds.length > 0) {
+            setSelectedCardId(crds[0].id);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      };
+      loadOptions();
     }
+  }, [open]);
 
+  // Adjust options based on transaction type
+  const txType = form.watch('type');
+  useEffect(() => {
+    if (txType === 'income') {
+      setPaymentMethod('account'); // Income must go to bank account
+    }
+  }, [txType]);
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setLoading(true);
+    const amountNum = Number(values.amount);
+
     try {
+      // Find associated account or card
+      const acc = accounts.find(a => a.id === selectedAccountId);
+      const card = cards.find(c => c.id === selectedCardId);
+      const sourceName = paymentMethod === 'account' 
+        ? (acc ? acc.name : 'Outro') 
+        : (card ? card.name : 'Cartão de Crédito');
+
+      // 1. DEMO MODE (LocalStorage fallback)
+      if (!isSupabaseConfigured) {
+        const localSaved = localStorage.getItem('finna_transactions');
+        const txs = localSaved ? JSON.parse(localSaved) : [];
+
+        // Check if installment credit card purchase
+        if (paymentMethod === 'card' && installments > 1 && values.type === 'expense') {
+          const partAmount = Number((amountNum / installments).toFixed(2));
+          const baseDate = parseISO(values.date);
+          const generatedTxs: any[] = [];
+
+          for (let i = 1; i <= installments; i++) {
+            const installmentDate = addMonths(baseDate, i - 1);
+            const installmentDateStr = format(installmentDate, 'yyyy-MM-mm').replace(/-[0-9]{2}$/, '-' + String(installmentDate.getDate()).padStart(2, '0')); 
+            // Fix eventual format issues with simple format:
+            const finalDateStr = format(installmentDate, 'yyyy-MM-dd');
+            
+            generatedTxs.push({
+              id: 'tx-' + Math.random().toString(36).substring(2, 9),
+              description: `${values.description} (${i}/${installments})`,
+              amount: -partAmount,
+              date: finalDateStr,
+              type: 'expense',
+              category: values.category,
+              emotion: values.emotion || 'Neutro',
+              is_impulse: values.isImpulse,
+              necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+              source: sourceName,
+              card_id: selectedCardId,
+              installments: `${i}/${installments}`,
+              status: 'completed'
+            });
+          }
+
+          localStorage.setItem('finna_transactions', JSON.stringify([...generatedTxs, ...txs]));
+        } else {
+          // Regular bank transaction or single payment card purchase
+          const finalAmount = values.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+          const newTx = {
+            id: 'tx-' + Math.random().toString(36).substring(2, 9),
+            description: values.description,
+            amount: finalAmount,
+            date: values.date,
+            type: values.type,
+            category: values.category,
+            emotion: values.emotion || 'Neutro',
+            is_impulse: values.isImpulse,
+            necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+            source: sourceName,
+            account_id: paymentMethod === 'account' ? selectedAccountId : undefined,
+            card_id: paymentMethod === 'card' ? selectedCardId : undefined,
+            status: 'completed'
+          };
+
+          // If bank debit/credit account, update its balance in LocalStorage
+          if (paymentMethod === 'account' && acc) {
+            const updatedAccList = accounts.map(a => {
+              if (a.id === selectedAccountId) {
+                return { ...a, balance: a.balance + finalAmount };
+              }
+              return a;
+            });
+            localStorage.setItem('finna_accounts', JSON.stringify(updatedAccList));
+          }
+
+          localStorage.setItem('finna_transactions', JSON.stringify([newTx, ...txs]));
+        }
+
+        toast.success('Transação registrada no modo demonstração!');
+        onOpenChange(false);
+        setStep(1);
+        form.reset();
+        window.location.reload();
+        return;
+      }
+
+      // 2. SUPABASE MODE
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
-      const { error } = await supabase.from('transactions').insert({
-        user_id: user.id,
-        description: values.description,
-        amount: values.type === 'expense' ? -Math.abs(Number(values.amount)) : Math.abs(Number(values.amount)),
-        date: values.date,
-        type: values.type,
-        category: values.category,
-        emotion: values.emotion || 'Neutro',
-        is_impulse: values.isImpulse,
-        necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
-        source: values.source || 'Manual',
-        status: 'completed'
-      });
+      if (paymentMethod === 'card' && installments > 1 && values.type === 'expense') {
+        const partAmount = Number((amountNum / installments).toFixed(2));
+        const baseDate = parseISO(values.date);
+        const rowsToInsert = [];
 
-      if (error) throw error;
-      
+        for (let i = 1; i <= installments; i++) {
+          const installmentDateStr = format(addMonths(baseDate, i - 1), 'yyyy-MM-dd');
+          rowsToInsert.push({
+            user_id: user.id,
+            description: `${values.description} (${i}/${installments})`,
+            amount: -partAmount,
+            date: installmentDateStr,
+            type: 'expense',
+            category: values.category,
+            emotion: values.emotion || 'Neutro',
+            is_impulse: values.isImpulse,
+            necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+            source: sourceName,
+            card_id: selectedCardId,
+            installments: `${i}/${installments}`,
+            status: 'completed'
+          });
+        }
+
+        const { error } = await supabase.from('transactions').insert(rowsToInsert);
+        if (error) throw error;
+      } else {
+        // Single regular transaction
+        const finalAmount = values.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+        const { error } = await supabase.from('transactions').insert({
+          user_id: user.id,
+          description: values.description,
+          amount: finalAmount,
+          date: values.date,
+          type: values.type,
+          category: values.category,
+          emotion: values.emotion || 'Neutro',
+          is_impulse: values.isImpulse,
+          necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
+          source: sourceName,
+          account_id: paymentMethod === 'account' ? selectedAccountId : null,
+          card_id: paymentMethod === 'card' ? selectedCardId : null,
+          status: 'completed'
+        });
+
+        if (error) throw error;
+
+        // Balance reduction query
+        if (paymentMethod === 'account' && acc) {
+          const { error: accError } = await supabase
+            .from('accounts')
+            .update({ balance: acc.balance + finalAmount })
+            .eq('id', selectedAccountId);
+          if (accError) console.error('Error updating account balance', accError);
+        }
+      }
+
       toast.success('Transação registrada com sucesso!');
       onOpenChange(false);
       setStep(1);
       form.reset();
-      // Reload page to see new data (simple way)
       window.location.reload();
     } catch (err: any) {
       console.error(err);
@@ -141,14 +273,14 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="description" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">O que foi comprado?</Label>
-                  <Input id="description" placeholder="Ex: Mercado Mensal" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" {...form.register('description')} />
+                  <Label htmlFor="description" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">O que foi comprado / recebido?</Label>
+                  <Input id="description" placeholder="Ex: Mercado Mensal, Salário" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500 font-medium" {...form.register('description')} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="amount" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Valor (R$)</Label>
-                    <Input id="amount" placeholder="0,00" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 font-bold text-slate-50 focus:border-indigo-500" {...form.register('amount')} />
+                    <Label htmlFor="amount" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Valor total (R$)</Label>
+                    <Input id="amount" placeholder="0,00" type="number" step="any" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 font-bold text-slate-50 focus:border-indigo-500" {...form.register('amount')} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="date" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Data do fluxo</Label>
@@ -156,9 +288,87 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="source" className="text-[10px] uppercase tracking-widest font-bold text-slate-500 italic">Origem / Conta</Label>
-                  <Input id="source" placeholder="Ex: Dinheiro, Nubank, Itaú" className="rounded-xl border-slate-800 bg-slate-900/50 h-11 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500" {...form.register('source')} />
+                {/* DYNAMIC PAYMENT METHOD SELECTORS (CONTAS E CARTÕES) */}
+                <div className="space-y-3 bg-[#0c0c0e]/60 p-4 border border-slate-800 rounded-2xl">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-widest font-extrabold text-slate-400 italic">Forma de Pagamento</span>
+                    {txType === 'expense' && (
+                      <div className="flex gap-1.5 p-0.5 bg-slate-900 border border-slate-800 rounded-lg">
+                        <button 
+                          type="button"
+                          onClick={() => setPaymentMethod('account')}
+                          className={`px-3 py-1 text-[9px] font-bold uppercase tracking-wider rounded-md transition ${paymentMethod === 'account' ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}
+                        >
+                          Conta
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setPaymentMethod('card')}
+                          className={`px-3 py-1 text-[9px] font-bold uppercase tracking-wider rounded-md transition ${paymentMethod === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                        >
+                          Cartão
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {paymentMethod === 'account' ? (
+                    <div className="space-y-1">
+                      <Label className="text-[9px] uppercase tracking-wider font-extrabold text-slate-500 block">Conta Debitada / Creditada</Label>
+                      {accounts.length > 0 ? (
+                        <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                          <SelectTrigger className="rounded-xl border-slate-800 bg-slate-900/80 h-10 text-slate-100 font-medium">
+                            <SelectValue placeholder="Selecione a conta..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
+                            {accounts.map(acc => (
+                              <SelectItem key={acc.id} value={acc.id}>{acc.name} (R$ {acc.balance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="text-[10px] text-amber-500 italic font-semibold">Crie uma conta primeiro na aba Contas.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3 animate-in slide-in-from-top-1 duration-150">
+                      <div className="space-y-1">
+                        <Label className="text-[9px] uppercase tracking-wider font-extrabold text-slate-500 block">Cartão Selecionado</Label>
+                        {cards.length > 0 ? (
+                          <Select value={selectedCardId} onValueChange={setSelectedCardId}>
+                            <SelectTrigger className="rounded-xl border-slate-800 bg-slate-900/80 h-10 text-slate-100 font-medium">
+                              <SelectValue placeholder="Selecione o cartão..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#09090B] border-slate-800 text-slate-150">
+                              {cards.map(c => (
+                                <SelectItem key={c.id} value={c.id}>{c.name} (Lim: R$ {c.limit_amount.toLocaleString()})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="text-[10px] text-amber-500 italic font-semibold">Crie um cartão de crédito primeiro na aba de Contas.</p>
+                        )}
+                      </div>
+
+                      {/* Parcelas Selector */}
+                      <div className="pt-2 border-t border-slate-900/80 flex items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Parcelamento</span>
+                          <span className="text-[9px] text-indigo-400 block leading-tight font-medium">Dividir em parcelas mensais fixas</span>
+                        </div>
+                        <Select value={installments.toString()} onValueChange={(val) => setInstallments(Number(val))}>
+                          <SelectTrigger className="w-24 rounded-lg border-slate-800 bg-slate-900/50 h-9 font-extrabold text-slate-100 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                              <SelectItem key={n} value={n.toString()}>{n}x</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">

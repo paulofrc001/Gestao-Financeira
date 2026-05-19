@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { serverRateLimiter } from './lib/rateLimiter.js';
 
 dotenv.config();
 
@@ -9,6 +10,27 @@ const app = express();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Middleware for server rate limits on AI routes
+function enforceServerRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  // Simple rate limiting key using IP or a generic token
+  const ip = req.ip || req.headers['x-forwarded-for'] || 'global-server';
+  const rateLimitKey = `server:api:${String(ip)}`;
+
+  // Max 10 requests per rolling minute on backend
+  const status = serverRateLimiter.check(rateLimitKey, 10, 60000);
+
+  if (status.limited) {
+    console.warn(`[Backend RateLimiter] Blocked IP: ${ip}. Wait ${status.retryAfter}ms.`);
+    res.setHeader('Retry-After', Math.ceil(status.retryAfter / 1000));
+    return res.status(429).json({
+      error: '⚠️ O servidor registrou excesso de requisições de IA. Aguarde um momento para não esgotar as chaves de acesso.',
+      retryAfterMs: status.retryAfter
+    });
+  }
+
+  next();
+}
 
 // API Routes
 app.get('/api/health', (req, res) => {
@@ -20,7 +42,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Helper for AI calls with retry
+// Helper for AI calls with retry and model fallback
 async function generateWithRetry(params: any, retries = 3) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -36,31 +58,48 @@ async function generateWithRetry(params: any, retries = 3) {
     }
   });
 
-  for (let i = 0; i <= retries; i++) {
-     try {
-        if (!params.model) params.model = 'gemini-3-flash-preview';
-        return await ai.models.generateContent(params);
-     } catch (error: any) {
-        const errorMessage = error.message?.toLowerCase() || '';
-        const isRetryable = errorMessage.includes('429') || 
-                          errorMessage.includes('too many requests') ||
-                          errorMessage.includes('503') || 
-                          errorMessage.includes('overloaded') || 
-                          errorMessage.includes('high demand') ||
-                          errorMessage.includes('quota');
-        
-        if (isRetryable && i < retries) {
-           const waitTime = (i + 1) * 2000;
-           console.log(`AI busy or rate limited (429/503), retrying in ${waitTime}ms... (${i + 1}/${retries})`);
-           await new Promise(resolve => setTimeout(resolve, waitTime));
-           continue;
-        }
-        throw error;
-     }
+  // Array of models to try in sequence of availability
+  const modelsToTry = [
+    params.model || 'gemini-3-flash-preview',
+    'gemini-2.5-flash'
+  ];
+
+  for (const modelCandidate of modelsToTry) {
+    console.log(`[API] Attempting model: ${modelCandidate}`);
+    
+    for (let i = 0; i <= retries; i++) {
+       try {
+          const currentParams = { ...params, model: modelCandidate };
+          return await ai.models.generateContent(currentParams);
+       } catch (error: any) {
+          const errorMessage = error.message?.toLowerCase() || '';
+          const isRetryable = errorMessage.includes('429') || 
+                            errorMessage.includes('too many requests') ||
+                            errorMessage.includes('503') || 
+                            errorMessage.includes('overloaded') || 
+                            errorMessage.includes('high demand') ||
+                            errorMessage.includes('quota');
+          
+          if (isRetryable && i < retries) {
+             const waitTime = (i + 1) * 2000;
+             console.log(`[API] AI busy or rate limited (429/503) for model ${modelCandidate}. Retrying in ${waitTime}ms... (${i + 1}/${retries})`);
+             await new Promise(resolve => setTimeout(resolve, waitTime));
+             continue;
+          }
+          
+          // If we failed with 429 and have another fallback model Candidate, print warning and continue to fallback model
+          if (isRetryable && modelsToTry.indexOf(modelCandidate) < modelsToTry.length - 1) {
+             console.warn(`[API] Model ${modelCandidate} failed with quota/429. Switching immediately to fallback candidate.`);
+             break; // breaks inner retry, moves to next model candidate
+          }
+          
+          throw error;
+       }
+    }
   }
 }
 
-app.post('/api/ai/insights', async (req, res) => {
+app.post('/api/ai/insights', enforceServerRateLimit, async (req, res) => {
   console.log('[API] Generating insights...');
   try {
     const { transactions, goals } = req.body;
@@ -85,37 +124,47 @@ app.post('/api/ai/insights', async (req, res) => {
   }
 });
 
-app.post('/api/ai/chat', async (req, res) => {
+app.post('/api/ai/chat', enforceServerRateLimit, async (req, res) => {
+  console.log('[API] Processing Chat...');
   try {
     const { message } = req.body;
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('GEMINI_API_KEY missing');
 
     const ai = new GoogleGenAI({ apiKey });
-    const chat = ai.chats.create({
-      model: 'gemini-3-flash-preview',
-      config: {
-        systemInstruction: 'Você é o Finna, assistente financeiro familiar.'
-      }
-    });
-
+    
+    // We try to use a fallback logic directly for chat message
     let response;
-    for (let i = 0; i <= 3; i++) {
+    const chatModels = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
+    let chatError = null;
+
+    for (const chatModel of chatModels) {
+      const chat = ai.chats.create({
+        model: chatModel,
+        config: {
+          systemInstruction: 'Você é o Finna, assistente financeiro familiar.'
+        }
+      });
+      
       try {
         response = await chat.sendMessage({ message });
-        break;
-      } catch (error: any) {
-        if (i === 3) throw error;
-        await new Promise(resolve => setTimeout(resolve, (i + 1) * 2000));
+        chatError = null;
+        break; // Success!
+      } catch (err: any) {
+        console.warn(`[API] Chat model ${chatModel} failed: ${err.message}. Trying next if available.`);
+        chatError = err;
       }
     }
+
+    if (chatError) throw chatError;
     res.json({ text: response?.text || '' });
   } catch (error: any) {
+    console.error('Chat Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/ai/parse-statement', async (req, res) => {
+app.post('/api/ai/parse-statement', enforceServerRateLimit, async (req, res) => {
   console.log('[API] Processing parse-statement request...');
   try {
     const { text, fileType } = req.body;

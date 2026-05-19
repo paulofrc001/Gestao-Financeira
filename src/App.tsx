@@ -44,7 +44,10 @@ import { MainFlowChart, CategoriesPieChart, EmotionalRadarChart } from './compon
 import NewTransactionDialog from './components/NewTransactionDialog';
 import EditTransactionDialog from './components/EditTransactionDialog';
 import ImportPage from './components/ImportPage';
+import AccountsAndCardsPage from './components/AccountsAndCardsPage';
 import PeriodFilter, { filterTxsByDate, DateRangeFilter } from './components/PeriodFilter';
+import useGemini from './hooks/useGemini';
+import LoadingState from './components/LoadingState';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -138,13 +141,14 @@ export default function App() {
         {activeTab === 'insights' && <InsightsPage />}
         {activeTab === 'import' && <ImportPage />}
         {activeTab === 'emotional' && <EmotionalPage />}
-        {activeTab !== 'dashboard' && activeTab !== 'transactions' && activeTab !== 'insights' && activeTab !== 'emotional' && activeTab !== 'import' && (
+        {activeTab === 'accounts' && <AccountsAndCardsPage />}
+        {activeTab !== 'dashboard' && activeTab !== 'transactions' && activeTab !== 'insights' && activeTab !== 'emotional' && activeTab !== 'import' && activeTab !== 'accounts' && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
              <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mb-4 border border-slate-800">
                 <Settings className="text-slate-500 w-8 h-8" />
              </div>
              <h3 className="text-xl font-bold mb-2 text-slate-50">Em Construção</h3>
-             <p className="text-slate-400 max-w-md">Esta funcionalidade está sendo polida para oferecer a melhor experiência fintech premium para sua família.</p>
+             <p className="text-slate-450 max-w-md">Esta funcionalidade está sendo polida para oferecer a melhor experiência fintech premium para sua família.</p>
           </div>
         )}
       </main>
@@ -791,62 +795,138 @@ function TransactionsPage() {
 }
 
 function InsightsPage() {
+   const [localTransactions, setLocalTransactions] = useState<any[]>([]);
+
+   useEffect(() => {
+     const loadTxs = async () => {
+       try {
+         if (isSupabaseConfigured) {
+           const { data, error } = await supabase
+             .from('transactions')
+             .select('*')
+             .order('date', { ascending: false });
+           if (!error && data && data.length > 0) {
+             setLocalTransactions(data);
+             return;
+           }
+         }
+       } catch (err) {
+         console.warn('[InsightsPage] Supabase load error:', err);
+       }
+       setLocalTransactions(INITIAL_DEMO_TRANSACTIONS);
+     };
+     loadTxs();
+   }, []);
+
    const [messages, setMessages] = useState([
      { role: 'assistant', text: 'Olá! Sou o assistente Finna AI. Analisando o fluxo de caixa dos Silva, vejo que vocês estão gastando 20% acima do planejado em Delivery.' }
    ]);
    const [input, setInput] = useState('');
-   const [loading, setLoading] = useState(false);
+   const [insightsResult, setInsightsResult] = useState<{ insights: Array<{ title: string; text: string; indicator?: string }> | null }>({
+     insights: [
+       { title: 'Análise de Lazer', text: 'Detectamos 3 serviços de streaming não utilizados este mês. Economia potencial: R$ 89,90.', indicator: 'Alerta de Assinatura' },
+       { title: 'Estilo de Vida', text: 'Seus maiores picos de despesas acontecem nas noites de sextas e sábados, principalmente sob a emoção "Ansioso". Ter um plano fixado ajuda a poupar R$ 250 mensais.', indicator: 'Padrão Consumo' }
+     ]
+   });
 
-   const sendMessage = async () => {
-     if (!input.trim()) return;
+   const { sendMessage, generateInsights, loading: chatLoading, error: chatError } = useGemini();
+   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+
+   const triggerInsightsGeneration = async () => {
+     setIsGeneratingInsights(true);
+     toast.loading('Iniciando rastreamento de IA...');
+     try {
+       const cleanData = localTransactions.map(t => ({
+         description: t.description,
+         amount: t.amount,
+         category: t.category,
+         emotion: t.emotion,
+         date: t.date
+       }));
+
+       const data = await generateInsights(cleanData, []);
+       
+       if (data && Array.isArray(data.insights)) {
+         setInsightsResult({ insights: data.insights });
+         toast.success('Novos insights inteligentes gerados!');
+       } else if (data && data.insights) {
+         // Formatar objeto dinâmico se retornar outro padrão
+         const list = Object.keys(data.insights).map(k => ({
+           title: k,
+           text: typeof data.insights[k] === 'string' ? data.insights[k] : JSON.stringify(data.insights[k]),
+           indicator: 'Estratégia Finna'
+         }));
+         setInsightsResult({ insights: list });
+         toast.success('Insights gerados com sucesso!');
+       } else {
+         toast.error('Ocorreu um erro ao formatar a resposta da análise.');
+       }
+     } catch (err: any) {
+       toast.error('Não foi possível gerar a análise: ' + err.message);
+     } finally {
+       setIsGeneratingInsights(false);
+       toast.dismiss();
+     }
+   };
+
+   const handleChatSend = async () => {
+     if (!input.trim() || chatLoading) return;
      const userMsg = input;
      setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
      setInput('');
-     setLoading(true);
 
      try {
-       const res = await fetch('/api/ai/chat', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ message: userMsg, history: messages })
-       });
-       const data = await res.json();
-       setMessages(prev => [...prev, { role: 'assistant', text: data.text }]);
-     } catch (e) {
+       const responseData = await sendMessage(userMsg);
+       if (responseData && responseData.text) {
+         setMessages(prev => [...prev, { role: 'assistant', text: responseData.text }]);
+       } else if (chatError) {
+         setMessages(prev => [...prev, { role: 'assistant', text: `⚠️ Desculpe, não conseguimos processar agora devido a limites locais. Detalhes: ${chatError}` }]);
+       } else {
+         setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Nenhuma resposta recebida do assistente. Tente reiniciar a pergunta.' }]);
+       }
+     } catch (e: any) {
        console.error(e);
-     } finally {
-       setLoading(false);
+       toast.error('Erro na conversa: ' + e.message);
      }
    };
 
    return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
          <div className="space-y-6">
-            <Card className="bg-indigo-600 text-white rounded-3xl p-8 border-none overflow-hidden relative">
+            <Card className="bg-indigo-600 text-white rounded-3xl p-8 border-none overflow-hidden relative shadow-xl shadow-indigo-600/10">
                <div className="absolute -bottom-10 -right-10 opacity-10">
                   <BrainCircuit className="w-64 h-64" />
                </div>
-               <Badge className="bg-white/20 text-white border-white/30 mb-4 hover:bg-white/30">KazaIA Active</Badge>
-               <CardTitle className="text-3xl font-bold mb-4">Advisor Especialista</CardTitle>
-               <p className="text-indigo-100 mb-8 max-w-sm leading-relaxed">Padrões identificados: Você gasta mais em lazer nas sextas-feiras à noite após as 22h.</p>
-               <Button className="bg-white text-indigo-600 hover:bg-white/90 rounded-xl font-bold px-8 h-12">Gerar Nova Análise</Button>
+               <Badge className="bg-white/20 text-white border-white/30 mb-4 hover:bg-white/30">Finna Neural Engine</Badge>
+               <CardTitle className="text-3xl font-black tracking-tight mb-4 text-white">Advisor Familiar</CardTitle>
+               <p className="text-indigo-100 mb-8 max-w-sm leading-relaxed text-xs">
+                 Nossa inteligência lê o padrão sentimental, descrições redundantes e ajuda a prever rombos no planejamento financeiro doméstico.
+               </p>
+               <Button 
+                 disabled={isGeneratingInsights}
+                 onClick={triggerInsightsGeneration}
+                 className="bg-white text-indigo-600 hover:bg-slate-100 rounded-xl font-bold px-8 h-12 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+               >
+                 {isGeneratingInsights ? 'Analisando...' : 'Gerar Nova Análise'}
+               </Button>
             </Card>
 
             <div className="space-y-4">
                <h3 className="text-lg font-bold text-slate-50 italic">Insights KazaAI</h3>
                <div className="grid gap-4">
-                  {[1, 2].map((i) => (
-                     <Card key={i} className="bg-slate-900/40 border-slate-800 shadow-none rounded-2xl p-6">
-                        <div className="flex gap-4 items-start">
+                  {insightsResult?.insights && insightsResult.insights.map((ins, i) => (
+                     <Card key={i} className="bg-slate-900/40 border-slate-800/80 shadow-none rounded-2xl p-6 relative overflow-hidden transition-all hover:bg-slate-900/60 transition-transform duration-300">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full filter blur-xl pointer-events-none" />
+                        <div className="flex gap-4 items-start relative z-10">
                            <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/20">
                               <TrendingUp className="text-indigo-400 w-5 h-5" />
                            </div>
-                           <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                 <h4 className="font-bold text-slate-100">Alerta de Assinatura</h4>
-                                 <Badge className="text-[8px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 uppercase font-bold tracking-widest">IA Insight</Badge>
+                           <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                 <h4 className="font-bold text-slate-100 text-sm">{ins.title}</h4>
+                                 <Badge className="text-[7px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 uppercase font-black tracking-widest">{ins.indicator || 'IA Insight'}</Badge>
                               </div>
-                              <p className="text-sm text-slate-400">Detectamos 3 serviços de streaming não utilizados este mês. Economia potencial: R$ 89,90.</p>
+                              <p className="text-xs text-slate-400 leading-relaxed font-semibold italic">{ins.text}</p>
                            </div>
                         </div>
                      </Card>
@@ -854,35 +934,49 @@ function InsightsPage() {
                </div>
             </div>
          </div>
-
+ 
          <Card className="bg-slate-900/60 border-slate-800 shadow-none rounded-3xl flex flex-col h-[600px] overflow-hidden">
-            <CardHeader className="bg-[#09090B] border-b border-slate-800 py-4 px-6 flex flex-row items-center gap-3">
-               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                  <BrainCircuit className="text-white w-4 h-4" />
+            <CardHeader className="bg-[#09090B] border-b border-slate-800 py-4 px-6 flex flex-row items-center justify-between gap-3">
+               <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                     <BrainCircuit className="text-white w-4 h-4 animate-pulse" />
+                  </div>
+                  <div>
+                     <CardTitle className="text-xs font-black tracking-tight text-slate-50 uppercase">Finna AI Assistente</CardTitle>
+                     <p className="text-[8px] text-indigo-400 font-extrabold uppercase tracking-widest">Rate Limit Protegido</p>
+                  </div>
                </div>
-               <div>
-                  <CardTitle className="text-sm font-bold text-slate-50">KazaAI Assistente</CardTitle>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">Processando...</p>
-               </div>
+               {chatLoading && (
+                 <LoadingState variant="micro" message="IA pensando..." />
+               )}
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-6 space-y-4">
                {messages.map((m, i) => (
                  <div key={i} className={`${m.role === 'assistant' ? 'bg-slate-800/80 text-slate-200 rounded-tl-none border border-slate-700/50' : 'bg-indigo-600 text-white rounded-tr-none ml-auto shadow-xl shadow-indigo-500/10'} rounded-2xl p-4 max-w-[80%] transition-all`}>
-                    <p className="text-sm leading-relaxed">{m.text}</p>
+                    <p className="text-xs leading-relaxed font-medium">{m.text}</p>
                  </div>
                ))}
-               {loading && <div className="bg-slate-800/80 rounded-2xl rounded-tl-none p-4 max-w-[80%] animate-pulse border border-slate-700/50">...</div>}
+               
+               {chatLoading && (
+                 <div className="flex items-center gap-2.5 p-4 max-w-[85%] bg-slate-800/40 border border-slate-800/80 rounded-2xl rounded-tl-none text-slate-500 animate-pulse text-xs font-bold">
+                    <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-100" />
+                    <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-200" />
+                    <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-300" />
+                    <span className="italic text-[10px] ml-1.5">Algoritmo de anti-spam ativado...</span>
+                 </div>
+               )}
             </CardContent>
-            <div className="p-4 bg-[#09090B] border-t border-slate-800 flex gap-2">
+            <div className="p-4 bg-[#09090B] border-t border-slate-850 flex gap-2">
                <Input 
                  value={input}
+                 disabled={chatLoading}
                  onChange={e => setInput(e.target.value)}
-                 onKeyPress={e => e.key === 'Enter' && sendMessage()}
-                 placeholder="Pergunte à IA..." 
-                 className="rounded-xl border-slate-700 bg-slate-800 text-slate-100 focus:border-indigo-500 h-10" 
+                 onKeyPress={e => e.key === 'Enter' && handleChatSend()}
+                 placeholder={chatLoading ? "Aguardando resposta do Finna..." : "Pergunte à IA Finna..."} 
+                 className="rounded-xl border-slate-800 bg-slate-900/60 text-slate-100 placeholder:text-slate-700 focus:border-indigo-500 h-11 text-xs" 
                />
-               <Button onClick={sendMessage} disabled={loading} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 h-10 px-3">
-                 <Plus className="w-4 h-4" />
+               <Button onClick={handleChatSend} disabled={chatLoading} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 h-11 px-4 transition-all">
+                  <Plus className="w-4 h-4 text-white" />
                </Button>
             </div>
          </Card>
