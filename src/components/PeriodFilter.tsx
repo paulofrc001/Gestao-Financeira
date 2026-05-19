@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { format, subMonths, isWithinInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-export type PeriodType = 'all' | 'current_month' | 'last_month' | 'custom' | 'specific_month';
+export type PeriodType = 'all' | 'current_month' | 'last_month' | 'last_30_days' | 'last_90_days' | 'this_year' | 'custom' | 'specific_month';
 
 export interface DateRangeFilter {
   type: PeriodType;
@@ -69,6 +69,12 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
       const lastMonthDate = subMonths(now, 1);
       const yearMonth = format(lastMonthDate, 'yyyy-MM');
       onChange({ type: 'last_month', specificMonth: yearMonth });
+    } else if (type === 'last_30_days') {
+      onChange({ type: 'last_30_days' });
+    } else if (type === 'last_90_days') {
+      onChange({ type: 'last_90_days' });
+    } else if (type === 'this_year') {
+      onChange({ type: 'this_year' });
     } else if (type === 'specific_month' && specificM) {
       setSelectedSpecificMonth(specificM);
       onChange({ type: 'specific_month', specificMonth: specificM });
@@ -103,8 +109,8 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
   };
 
   return (
-    <div className="w-full flex flex-col gap-4 bg-slate-900/10 border border-slate-800/60 rounded-3xl p-5 mb-6">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <div className="w-full flex flex-col gap-4 bg-slate-900/10 border border-slate-800/60 rounded-3xl p-5 mb-6 animate-in fade-in duration-300">
+      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
             <Calendar className="w-5 h-5 text-indigo-400" />
@@ -116,12 +122,12 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
         </div>
 
         {/* Action button-pills */}
-        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap gap-1.5 w-full xl:w-auto">
           <Button
             type="button"
             variant="ghost"
             onClick={() => handleTypeSelect('all')}
-            className={`rounded-xl px-4 py-1.5 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${activeType === 'all' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'all' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
           >
             Tudo
           </Button>
@@ -130,7 +136,7 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
             type="button"
             variant="ghost"
             onClick={() => handleTypeSelect('current_month')}
-            className={`rounded-xl px-4 py-1.5 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${activeType === 'current_month' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'current_month' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
           >
             Este Mês
           </Button>
@@ -139,9 +145,36 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
             type="button"
             variant="ghost"
             onClick={() => handleTypeSelect('last_month')}
-            className={`rounded-xl px-4 py-1.5 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${activeType === 'last_month' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'last_month' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
           >
             Mês Passado
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => handleTypeSelect('last_30_days')}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'last_30_days' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+          >
+            30 Dias
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => handleTypeSelect('last_90_days')}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'last_90_days' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+          >
+            Trimestre
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => handleTypeSelect('this_year')}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'this_year' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+          >
+            Este Ano
           </Button>
 
           {/* Quick Select specific month dropdown */}
@@ -150,10 +183,10 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
               type="button"
               variant="outline"
               onClick={() => setShowDropdown(!showDropdown)}
-              className={`rounded-xl px-4 py-1.5 h-9 text-[10px] font-bold uppercase tracking-widest border-slate-800 transition-all ${activeType === 'specific_month' ? 'bg-indigo-600 text-white border-none' : 'bg-slate-900/40 text-slate-400 hover:bg-slate-800/50'}`}
+              className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider border-slate-800/80 transition-all ${activeType === 'specific_month' ? 'bg-indigo-600 text-white border-none' : 'bg-slate-900/40 text-slate-400 hover:bg-slate-800/50'}`}
             >
               {activeType === 'specific_month' ? formatMonthLabel(selectedSpecificMonth) : 'Mensal'}
-              <ChevronDown className="w-3.5 h-3.5 ml-2 shrink-0 opacity-80" />
+              <ChevronDown className="w-3 ml-1.5 shrink-0 opacity-80" />
             </Button>
             
             {showDropdown && (
@@ -163,11 +196,11 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
                     key={m}
                     type="button"
                     onClick={() => handleTypeSelect('specific_month', m)}
-                    className="w-full text-left px-3 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wide text-slate-300 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors"
+                    className="w-full text-left px-3 py-2 rounded-lg text-[9px] font-bold uppercase tracking-wide text-slate-300 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors"
                   >
                     {formatMonthLabel(m)}
                     {activeType === 'specific_month' && selectedSpecificMonth === m && (
-                      <Check className="w-3.5 h-3.5" />
+                      <Check className="w-3 h-3" />
                     )}
                   </button>
                 ))}
@@ -179,7 +212,7 @@ export default function PeriodFilter({ onChange, transactions }: PeriodFilterPro
             type="button"
             variant="ghost"
             onClick={() => setActiveType('custom')}
-            className={`rounded-xl px-4 py-1.5 h-9 text-[10px] font-bold uppercase tracking-widest transition-all ${activeType === 'custom' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
+            className={`rounded-xl px-3 py-1 h-8 text-[9px] font-bold uppercase tracking-wider transition-all ${activeType === 'custom' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'}`}
           >
             Personalizado
           </Button>
@@ -240,6 +273,8 @@ export function filterTxsByDate(transactions: any[], filter: DateRangeFilter): a
   if (!transactions || transactions.length === 0) return [];
   if (filter.type === 'all') return transactions;
 
+  const now = new Date();
+
   return transactions.filter(tx => {
     if (!tx.date) return true;
     
@@ -252,6 +287,28 @@ export function filterTxsByDate(transactions: any[], filter: DateRangeFilter): a
       }
     }
     
+    if (filter.type === 'last_30_days') {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(now.getDate() - 30);
+      const startStr = thirtyDaysAgo.toISOString().substring(0, 10);
+      const endStr = now.toISOString().substring(0, 10);
+      return txDateStr >= startStr && txDateStr <= endStr;
+    }
+
+    if (filter.type === 'last_90_days') {
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(now.getDate() - 90);
+      const startStr = ninetyDaysAgo.toISOString().substring(0, 10);
+      const endStr = now.toISOString().substring(0, 10);
+      return txDateStr >= startStr && txDateStr <= endStr;
+    }
+
+    if (filter.type === 'this_year') {
+      const yearStartStr = `${now.getFullYear()}-01-01`;
+      const yearEndStr = `${now.getFullYear()}-12-31`;
+      return txDateStr >= yearStartStr && txDateStr <= yearEndStr;
+    }
+
     if (filter.type === 'custom') {
       const { startDate, endDate } = filter;
       if (startDate && txDateStr < startDate) return false;

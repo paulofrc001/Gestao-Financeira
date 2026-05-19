@@ -106,7 +106,7 @@ export function useGemini<T = any>(): UseGeminiResult<T> {
         return response.data;
       } catch (err: any) {
         setError(err.message || String(err));
-        return null;
+        throw err;
       } finally {
         setLoading(false);
       }

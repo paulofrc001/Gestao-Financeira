@@ -13,7 +13,10 @@ import {
   Percent, 
   Sparkles,
   RefreshCw,
-  Info
+  Info,
+  UploadCloud,
+  Check,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { 
@@ -51,6 +54,8 @@ import {
   getInvoiceBillingMonth
 } from '../lib/accountsCardsStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useGemini } from '../hooks/useGemini';
+import { format } from 'date-fns';
 
 interface AccountsAndCardsPageProps {
   onRefreshTrigger?: () => void;
@@ -90,6 +95,15 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
   const [payingCard, setPayingCard] = useState<CreditCardType | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [paySourceAccountId, setPaySourceAccountId] = useState('');
+
+  // AI PDF/Statement Import inside Credit Card Creation Flow
+  const [importStatement, setImportStatement] = useState(false);
+  const [pastedText, setPastedText] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isParsingCC, setIsParsingCC] = useState(false);
+
+  const { parseStatement } = useGemini();
 
   // Forecast state
   const [forecastMonths, setForecastMonths] = useState<{ value: string; label: string }[]>([]);
@@ -236,6 +250,9 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
       due_day: '17',
       brand: 'Mastercard'
     });
+    setImportStatement(false);
+    setPastedText('');
+    setUploadedFile(null);
     setIsCardModalOpen(true);
   };
 
@@ -249,6 +266,9 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
       due_day: card.due_day.toString(),
       brand: card.brand || 'Mastercard'
     });
+    setImportStatement(false);
+    setPastedText('');
+    setUploadedFile(null);
     setIsCardModalOpen(true);
   };
 
@@ -266,8 +286,12 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
       return;
     }
 
+    setIsParsingCC(true);
+    let cardParseToastId: string | number | undefined;
+
     try {
-      await saveCard({
+      // 1. Save credit card definition first to retrieve its assigned database ID
+      const savedCardCC = await saveCard({
         id: editingCard?.id,
         name: cardFormData.name,
         account_id: cardFormData.account_id,
@@ -277,11 +301,94 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
         brand: cardFormData.brand
       });
 
-      toast.success(editingCard ? 'Cartão editado com sucesso!' : 'Novo cartão registrado!');
+      // 2. Compute text-statement parsing if import statement is selected and not editing
+      if (importStatement && !editingCard) {
+        let textToParse = pastedText;
+        let fileType = 'txt';
+
+        if (uploadedFile) {
+          fileType = uploadedFile.name.split('.').pop() || 'txt';
+          textToParse = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve((e.target?.result as string) || '');
+            reader.onerror = () => reject(new Error('Falha na leitura do arquivo local.'));
+            reader.readAsText(uploadedFile);
+          });
+        }
+
+        if (textToParse && textToParse.trim().length > 10) {
+          cardParseToastId = toast.loading('Análise Neural Activa: O Finna está processando e categorizando sua fatura...');
+          
+          const parsedData = await parseStatement(textToParse.slice(0, 15000), fileType);
+
+          if (parsedData && parsedData.transactions && parsedData.transactions.length > 0) {
+            toast.loading(`A IA identificou ${parsedData.transactions.length} compras. Vinculando-as ao cartão...`, { id: cardParseToastId });
+
+            const assignedCardId = savedCardCC.id;
+            const assignedCardName = savedCardCC.name;
+
+            let user_UUID: string | null = null;
+            if (isSupabaseConfigured) {
+              const { data: { user } } = await supabase.auth.getUser();
+              user_UUID = user?.id || null;
+            }
+
+            const currentYear = new Date().getFullYear();
+            const transactionsToBeSaved = parsedData.transactions.map((tx: any) => {
+              let parsedTransactionDate = tx.date || format(new Date(), 'yyyy-MM-dd');
+              if (parsedTransactionDate.length === 5) {
+                // Attach current year if only MM-DD is supplied
+                parsedTransactionDate = `${currentYear}-${parsedTransactionDate}`;
+              }
+
+              return {
+                id: isSupabaseConfigured ? undefined : 'tx-' + Math.random().toString(36).substring(2, 9),
+                user_id: user_UUID || undefined,
+                description: tx.description,
+                amount: tx.amount < 0 ? tx.amount : -Math.abs(tx.amount || 0), // Credit cards are negative expenses
+                category: tx.category || 'Outros',
+                date: parsedTransactionDate,
+                type: 'expense' as const,
+                is_subscription: tx.isSubscription || tx.is_subscription || false,
+                is_recurring: tx.isRecurring || tx.is_recurring || false,
+                installments: tx.installments || null,
+                emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
+                status: 'completed',
+                source: assignedCardName,
+                card_id: assignedCardId
+              };
+            });
+
+            // Persist the transaction items
+            if (isSupabaseConfigured) {
+              const { error: batchInsertError } = await supabase.from('transactions').insert(transactionsToBeSaved);
+              if (batchInsertError) throw batchInsertError;
+            } else {
+              const localStorageTransactions = localStorage.getItem('finna_transactions');
+              const txsList = localStorageTransactions ? JSON.parse(localStorageTransactions) : [];
+              localStorage.setItem('finna_transactions', JSON.stringify([...transactionsToBeSaved, ...txsList]));
+            }
+
+            toast.success(`Sucesso absoluto! Cartão criado e ${parsedData.transactions.length} despesas importadas e categorizadas por IA!`, { id: cardParseToastId });
+          } else {
+            toast.dismiss(cardParseToastId);
+            toast.warning('O Gemini não encontrou transações legíveis no documento enviado.', { duration: 5000 });
+          }
+        } else {
+          toast.warning('O conteúdo fornecido é muito curto para ser processado com segurança.');
+        }
+      }
+
+      toast.success(editingCard ? 'Cartão editado com sucesso!' : 'Novo cartão registrado com sucesso!');
       setIsCardModalOpen(false);
       fetchAllData();
+      if (onRefreshTrigger) onRefreshTrigger();
     } catch (err: any) {
-      toast.error('Erro ao salvar cartão: ' + err.message);
+      console.error(err);
+      if (cardParseToastId) toast.dismiss(cardParseToastId);
+      toast.error('Erro crítico na gravação de dados / IA: ' + err.message);
+    } finally {
+      setIsParsingCC(false);
     }
   };
 
@@ -917,11 +1024,138 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Smart Interactive PDF or Text Invoice Statement AI Loader */}
+            {!editingCard && (
+              <div className="pt-2 border-t border-slate-900/60 space-y-3">
+                <div className="flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-2xl transition">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div>
+                      <Label htmlFor="import-toggle" className="text-xs font-black text-slate-200 block cursor-pointer">
+                        Importar Fatura via IA?
+                      </Label>
+                      <span className="text-[9.5px] text-slate-400 block leading-normal max-w-[200px]">
+                        Extraia e lance todas as despesas automaticamente do PDF ou texto
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    id="import-toggle"
+                    type="checkbox"
+                    checked={importStatement}
+                    onChange={(e) => setImportStatement(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 border-slate-800 cursor-pointer"
+                  />
+                </div>
+
+                {importStatement && (
+                  <div className="space-y-4 p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 animate-in slide-in-from-top-3 duration-300">
+                    <div className="space-y-2">
+                      <span className="text-[9px] uppercase tracking-widest font-black text-indigo-400 block italic leading-none">
+                        Fatura Original (PDF / TXT / OFX)
+                      </span>
+                      
+                      {/* Drag & Drop Target Area */}
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setIsDragOver(true);
+                        }}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsDragOver(false);
+                          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                            setUploadedFile(e.dataTransfer.files[0]);
+                            toast.success(`Arquivo "${e.dataTransfer.files[0].name}" selecionado!`);
+                          }
+                        }}
+                        className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                          isDragOver
+                            ? 'border-indigo-400 bg-indigo-500/10'
+                            : uploadedFile
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-slate-800 hover:border-indigo-500/50 bg-[#08080a]'
+                        }`}
+                        onClick={() => document.getElementById('card-file-input')?.click()}
+                      >
+                        <input
+                          id="card-file-input"
+                          type="file"
+                          accept=".pdf,.txt,.ofx,.csv,.json"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              setUploadedFile(e.target.files[0]);
+                              toast.success(`Arquivo "${e.target.files[0].name}" selecionado!`);
+                            }
+                          }}
+                        />
+                        
+                        {uploadedFile ? (
+                          <div className="space-y-2">
+                            <div className="mx-auto w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                              <Check className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="text-xs font-bold text-slate-200 block truncate">{uploadedFile.name}</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">({(uploadedFile.size / 1024).toFixed(1)} KB)</span>
+                            </div>
+                            <span className="text-[9px] text-indigo-400 block font-black underline decoration-dotted uppercase tracking-wider">
+                              Substituir arquivo
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <UploadCloud className="w-6 h-6 text-indigo-400 mx-auto opacity-80" />
+                            <div className="space-y-0.5">
+                              <span className="text-[11px] font-bold text-slate-350 block">Arraste ou clique para enviar fatura</span>
+                              <span className="text-[9px] text-slate-500 block leading-tight">Formatos: PDF, TXT, OFX ou CSV (Máx. 5MB)</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-slate-850"></div>
+                      <span className="flex-shrink mx-3 text-[9px] text-indigo-400 font-extrabold tracking-widest uppercase">OU COLE O TEXTO</span>
+                      <div className="flex-grow border-t border-slate-850"></div>
+                    </div>
+
+                    {/* Copied Text Paste Area */}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="importPasteText" className="text-[9px] uppercase tracking-widest font-bold text-indigo-400 block italic leading-none">
+                        Texto Copiado da Fatura Bancária
+                      </Label>
+                      <textarea
+                        id="importPasteText"
+                        rows={3}
+                        value={pastedText}
+                        onChange={(e) => setPastedText(e.target.value)}
+                        placeholder="Caso o PDF possua senha ou prefira, selecione todo o texto no seu leitor de PDF do banco, copie e cole aqui..."
+                        className="w-full text-xs font-mono p-3 rounded-xl border border-slate-850 bg-[#08080a] text-slate-300 placeholder-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter className="px-8 py-5 border-t border-slate-800 bg-slate-900/10 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setIsCardModalOpen(false)} className="rounded-xl text-slate-400">Cancelar</Button>
-            <Button onClick={handleSaveCard} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6">Salvar Cartão</Button>
+            <Button variant="ghost" disabled={isParsingCC} onClick={() => setIsCardModalOpen(false)} className="rounded-xl text-slate-400">Cancelar</Button>
+            <Button 
+              disabled={isParsingCC} 
+              onClick={handleSaveCard} 
+              className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 flex items-center gap-2"
+            >
+              {isParsingCC && <Loader2 className="w-4 h-4 animate-spin text-indigo-200" />}
+              {isParsingCC ? 'Processando IA...' : 'Salvar Cartão'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

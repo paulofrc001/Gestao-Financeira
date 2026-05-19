@@ -226,10 +226,130 @@ function Dashboard() {
 
   // Group by month or day intervals for the Area chart
   const flowChartData = React.useMemo(() => {
-    const isSingleMonth = ['current_month', 'last_month', 'specific_month'].includes(dateFilter.type);
+    // Helper to calculate days between two YYYY-MM-DD
+    const getDaysDifference = (d1: string, d2: string): number => {
+      try {
+        const t1 = new Date(d1 + "T00:00:00").getTime();
+        const t2 = new Date(d2 + "T00:00:00").getTime();
+        return Math.ceil(Math.abs(t2 - t1) / (1000 * 60 * 60 * 24)) + 1;
+      } catch {
+        return 30;
+      }
+    };
+
+    // Helper to get bounds of any DateRangeFilter
+    const getFilterBoundsAndDays = () => {
+      const now = new Date();
+      const endStr = now.toISOString().substring(0, 10);
+      
+      if (dateFilter.type === 'all') {
+        if (allTransactions.length > 0) {
+          const sorted = [...allTransactions]
+            .map(t => t.date)
+            .filter(Boolean)
+            .sort();
+          if (sorted.length > 0) {
+            const startStr = sorted[0].substring(0, 10);
+            return { start: startStr, end: endStr, days: getDaysDifference(startStr, endStr) };
+          }
+        }
+        const fiveMonthsAgo = subMonths(now, 5);
+        const startStr = fiveMonthsAgo.toISOString().substring(0, 10);
+        return { start: startStr, end: endStr, days: 150 };
+      }
+      
+      if (dateFilter.type === 'current_month') {
+        const mPlusOne = now.getMonth() + 1;
+        const startStr = `${now.getFullYear()}-${String(mPlusOne).padStart(2, '0')}-01`;
+        return { start: startStr, end: endStr, days: 31 };
+      }
+      
+      if (dateFilter.type === 'last_month') {
+        const prev = subMonths(now, 1);
+        const yearMonth = format(prev, 'yyyy-MM');
+        const startStr = `${yearMonth}-01`;
+        const lastDay = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate();
+        const lastStr = `${yearMonth}-${String(lastDay).padStart(2, '0')}`;
+        return { start: startStr, end: lastStr, days: 31 };
+      }
+
+      if (dateFilter.type === 'specific_month' && dateFilter.specificMonth) {
+        const startStr = `${dateFilter.specificMonth}-01`;
+        const [y, m] = dateFilter.specificMonth.split('-').map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        const lastStr = `${dateFilter.specificMonth}-${String(lastDay).padStart(2, '0')}`;
+        return { start: startStr, end: lastStr, days: 31 };
+      }
+      
+      if (dateFilter.type === 'last_30_days') {
+        const start = new Date();
+        start.setDate(now.getDate() - 30);
+        const startStr = start.toISOString().substring(0, 10);
+        return { start: startStr, end: endStr, days: 30 };
+      }
+
+      if (dateFilter.type === 'last_90_days') {
+        const start = new Date();
+        start.setDate(now.getDate() - 90);
+        const startStr = start.toISOString().substring(0, 10);
+        return { start: startStr, end: endStr, days: 90 };
+      }
+
+      if (dateFilter.type === 'this_year') {
+        const startStr = `${now.getFullYear()}-01-01`;
+        return { start: startStr, end: endStr, days: 365 };
+      }
+
+      if (dateFilter.type === 'custom') {
+        const startStr = dateFilter.startDate || '1970-01-01';
+        const lastStr = dateFilter.endDate || endStr;
+        return { start: startStr, end: lastStr, days: getDaysDifference(startStr, lastStr) };
+      }
+
+      return { start: '1970-01-01', end: endStr, days: 365 };
+    };
+
+    const { start, end, days } = getFilterBoundsAndDays();
     
+    // 1. High Resolution Daily View (for small scopes: <= 8 days)
+    if (days <= 8) {
+      const daysList: { name: string; entrada: number; saida: number; orderKey: string }[] = [];
+      const current = new Date(start + "T00:00:00");
+      const stopDate = new Date(end + "T00:00:00");
+      
+      let count = 0;
+      while (current <= stopDate && count < 20) {
+        const key = current.toISOString().substring(0, 10);
+        const name = format(current, 'dd MMM', { locale: ptBR });
+        daysList.push({
+          name: name.replace('.', ''),
+          entrada: 0,
+          saida: 0,
+          orderKey: key
+        });
+        current.setDate(current.getDate() + 1);
+        count++;
+      }
+
+      filteredTransactions.forEach((tx: any) => {
+        if (!tx.date) return;
+        const txDate = tx.date.substring(0, 10);
+        const match = daysList.find(d => d.orderKey === txDate);
+        if (match) {
+          const amount = Number(tx.amount || 0);
+          if (tx.type === 'income') {
+            match.entrada += amount;
+          } else if (tx.type === 'expense') {
+            match.saida += Math.abs(amount);
+          }
+        }
+      });
+      return daysList;
+    }
+
+    // 2. High/Medium Resolution Month/Week/5-day View (for <= 45 days)
+    const isSingleMonth = ['current_month', 'last_month', 'specific_month'].includes(dateFilter.type);
     if (isSingleMonth && dateFilter.specificMonth) {
-      // Group by 5-day intervals
       const intervals = [
         { name: '1-5', entrada: 0, saida: 0 },
         { name: '6-10', entrada: 0, saida: 0 },
@@ -246,7 +366,7 @@ function Dashboard() {
         const dayNum = Number(parts[2].substring(0, 2));
         if (isNaN(dayNum)) return;
 
-        let idx = 5; // Default for 26+
+        let idx = 5; 
         if (dayNum <= 5) idx = 0;
         else if (dayNum <= 10) idx = 1;
         else if (dayNum <= 15) idx = 2;
@@ -262,54 +382,94 @@ function Dashboard() {
       });
 
       return intervals;
-    } else {
-      // Group by month
-      const monthlyMap: Record<string, { name: string; entrada: number; saida: number; orderKey: string }> = {};
-      const now = new Date();
-      const defaultMonthsToShow = 5;
-      
-      for (let i = defaultMonthsToShow - 1; i >= 0; i--) {
-        const d = subMonths(now, i);
-        const key = format(d, 'yyyy-MM');
-        const name = format(d, 'MMM', { locale: ptBR });
-        monthlyMap[key] = {
-          name: name.charAt(0).toUpperCase() + name.slice(1),
+    } else if (days > 8 && days <= 45) {
+      const weeksCount = Math.ceil(days / 7);
+      const intervals = Array.from({ length: weeksCount }, (_, idx) => {
+        const startW = new Date(start + "T00:00:00");
+        startW.setDate(startW.getDate() + idx * 7);
+        const endW = new Date(start + "T00:00:00");
+        endW.setDate(endW.getDate() + (idx * 7) + 6);
+        
+        const label = `Semana ${idx + 1} (${format(startW, 'd/MMM', { locale: ptBR })} - ${format(endW, 'd/MMM', { locale: ptBR })})`;
+        return {
+          name: label.replace(/\./g, ''),
           entrada: 0,
           saida: 0,
-          orderKey: key
+          startTimestamp: startW.getTime(),
+          endTimestamp: endW.getTime() + (24 * 60 * 60 * 1000) - 1
         };
-      }
+      });
 
-      // Add actual data
-      allTransactions.forEach((tx: any) => {
+      filteredTransactions.forEach((tx: any) => {
         if (!tx.date) return;
-        const key = tx.date.substring(0, 7);
-        const amount = Number(tx.amount || 0);
-        
-        if (!monthlyMap[key]) {
-          try {
-            const d = new Date(tx.date);
-            const name = format(d, 'MMM', { locale: ptBR });
-            monthlyMap[key] = {
-              name: name.charAt(0).toUpperCase() + name.slice(1),
-              entrada: 0,
-              saida: 0,
-              orderKey: key
-            };
-          } catch {
-            return;
+        const txTime = new Date(tx.date.substring(0, 10) + "T12:00:00").getTime();
+        const match = intervals.find(w => txTime >= w.startTimestamp && txTime <= w.endTimestamp);
+        if (match) {
+          const amount = Number(tx.amount || 0);
+          if (tx.type === 'income') {
+            match.entrada += amount;
+          } else if (tx.type === 'expense') {
+            match.saida += Math.abs(amount);
           }
-        }
-
-        if (tx.type === 'income') {
-          monthlyMap[key].entrada += amount;
-        } else if (tx.type === 'expense') {
-          monthlyMap[key].saida += Math.abs(amount);
         }
       });
 
-      return Object.values(monthlyMap).sort((a, b) => a.orderKey.localeCompare(b.orderKey));
+      return intervals.map(({ name, entrada, saida }) => ({ name, entrada, saida }));
     }
+
+    // 3. Medium/Low Resolution Monthly View (for larger intervals: > 45 days)
+    const monthlyMap: Record<string, { name: string; entrada: number; saida: number; orderKey: string }> = {};
+
+    try {
+      const current = new Date(start + "T00:00:00");
+      const stopDate = new Date(end + "T00:00:00");
+      let safetyCount = 0;
+      while (current <= stopDate && safetyCount < 36) {
+        const key = format(current, 'yyyy-MM');
+        if (!monthlyMap[key]) {
+          const name = format(current, 'MMM', { locale: ptBR });
+          monthlyMap[key] = {
+            name: name.charAt(0).toUpperCase() + name.slice(1).replace('.', ''),
+            entrada: 0,
+            saida: 0,
+            orderKey: key
+          };
+        }
+        current.setMonth(current.getMonth() + 1);
+        safetyCount++;
+      }
+    } catch (e) {
+      console.warn('[Dashboard] Error pre-populating months:', e);
+    }
+
+    filteredTransactions.forEach((tx: any) => {
+      if (!tx.date) return;
+      const key = tx.date.substring(0, 7);
+      const amount = Number(tx.amount || 0);
+      
+      if (!monthlyMap[key]) {
+        try {
+          const d = new Date(tx.date.substring(0, 10) + "T12:00:00");
+          const name = format(d, 'MMM', { locale: ptBR });
+          monthlyMap[key] = {
+            name: name.charAt(0).toUpperCase() + name.slice(1).replace('.', ''),
+            entrada: 0,
+            saida: 0,
+            orderKey: key
+          };
+        } catch {
+          return;
+        }
+      }
+
+      if (tx.type === 'income') {
+        monthlyMap[key].entrada += amount;
+      } else if (tx.type === 'expense') {
+        monthlyMap[key].saida += Math.abs(amount);
+      }
+    });
+
+    return Object.values(monthlyMap).sort((a, b) => a.orderKey.localeCompare(b.orderKey));
   }, [filteredTransactions, allTransactions, dateFilter]);
 
   // Compute categories distribution dynamically
@@ -388,15 +548,18 @@ function Dashboard() {
               <div>
                 <CardTitle className="text-lg font-bold text-slate-50">Fluxo de Caixa</CardTitle>
                 <CardDescription className="text-slate-400">
-                  {['current_month', 'last_month', 'specific_month'].includes(dateFilter.type) 
-                    ? "Acompanhamento diário das movimentações" 
-                    : "Acompanhamento mensal de entradas e saídas"}
+                  {['current_month', 'last_month', 'specific_month', 'last_30_days'].includes(dateFilter.type) 
+                    ? "Acompanhamento detalhado (diário/semanal) das movimentações" 
+                    : "Acompanhamento consolidado por períodos de entradas e saídas"}
                 </CardDescription>
               </div>
               <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest bg-indigo-500/10 px-3 py-1.5 rounded-full border border-indigo-500/15">
                 {dateFilter.type === 'all' && 'Período Completo'}
                 {dateFilter.type === 'current_month' && 'Este Mês'}
                 {dateFilter.type === 'last_month' && 'Mês Passado'}
+                {dateFilter.type === 'last_30_days' && 'Últimos 30 dias'}
+                {dateFilter.type === 'last_90_days' && 'Últimos 90 dias'}
+                {dateFilter.type === 'this_year' && 'Este Ano'}
                 {dateFilter.type === 'specific_month' && dateFilter.specificMonth && `Mês: ${dateFilter.specificMonth}`}
                 {dateFilter.type === 'custom' && 'Intervalo Customizado'}
               </span>

@@ -67,9 +67,8 @@ export default function ImportPage() {
           const fileExtension = file.name.split('.').pop() || 'txt';
           const data = await parseStatement(text.slice(0, 15000), fileExtension);
 
-          if (!data) {
-            // Error is handled inside the hook (aiError contain the error string)
-            throw new Error(aiError || 'Erro na decodificação do documento financeiro por IA.');
+          if (!data || !data.transactions) {
+            throw new Error('Não foi possível identificar nenhuma transação válida no documento.');
           }
 
           setTransactions(data.transactions || []);

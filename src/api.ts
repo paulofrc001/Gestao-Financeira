@@ -60,7 +60,7 @@ async function generateWithRetry(params: any, retries = 3) {
 
   // Array of models to try in sequence of availability
   const modelsToTry = [
-    params.model || 'gemini-3-flash-preview',
+    params.model || 'gemini-3.5-flash',
     'gemini-2.5-flash'
   ];
 
@@ -135,7 +135,7 @@ app.post('/api/ai/chat', enforceServerRateLimit, async (req, res) => {
     
     // We try to use a fallback logic directly for chat message
     let response;
-    const chatModels = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
+    const chatModels = ['gemini-3.5-flash', 'gemini-2.5-flash'];
     let chatError = null;
 
     for (const chatModel of chatModels) {
