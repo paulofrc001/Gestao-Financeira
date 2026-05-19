@@ -153,6 +153,7 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES families
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS color TEXT;
 
 -- Ensure transactions has all required columns for AI imports, emotional metrics, installments, etc.
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES families(id) ON DELETE CASCADE;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES accounts(id) ON DELETE CASCADE;
@@ -263,7 +264,13 @@ DROP POLICY IF EXISTS "Users can manage own cards" ON cards;
 CREATE POLICY "Users can manage own cards" ON cards
   FOR ALL TO authenticated
   USING (
-    account_id IN (SELECT id FROM accounts WHERE user_id = auth.uid() OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid()))
+    user_id = auth.uid() OR
+    account_id IN (
+      SELECT id FROM accounts 
+      WHERE user_id = auth.uid() 
+         OR user_id IS NULL 
+         OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+    )
   );
 
 -- NOTIFICATIONS policies

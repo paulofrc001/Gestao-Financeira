@@ -265,7 +265,7 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
 
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    const payload = {
+    const payload: any = {
       account_id: card.account_id,
       name: card.name,
       limit_amount: card.limit_amount,
@@ -276,23 +276,51 @@ export async function saveCard(card: Omit<Card, 'id'> & { id?: string }): Promis
     };
 
     let result;
-    if (card.id) {
-      const { data, error } = await supabase
-        .from('cards')
-        .update(payload)
-        .eq('id', card.id)
-        .select()
-        .single();
-      if (error) throw error;
-      result = data;
-    } else {
-      const { data, error } = await supabase
-        .from('cards')
-        .insert(payload)
-        .select()
-        .single();
-      if (error) throw error;
-      result = data;
+    try {
+      if (card.id) {
+        const { data, error } = await supabase
+          .from('cards')
+          .update(payload)
+          .eq('id', card.id)
+          .select()
+          .single();
+        if (error) throw error;
+        result = data;
+      } else {
+        const { data, error } = await supabase
+          .from('cards')
+          .insert(payload)
+          .select()
+          .single();
+        if (error) throw error;
+        result = data;
+      }
+    } catch (insertErr: any) {
+      // If user_id column doesn't exist in cards table schema, retry without it
+      if (insertErr && (insertErr.code === '42703' || String(insertErr.message).includes('user_id'))) {
+        console.warn('Retrying card save without user_id column...');
+        const { user_id, ...payloadWithoutUserId } = payload;
+        if (card.id) {
+          const { data, error } = await supabase
+            .from('cards')
+            .update(payloadWithoutUserId)
+            .eq('id', card.id)
+            .select()
+            .single();
+          if (error) throw error;
+          result = data;
+        } else {
+          const { data, error } = await supabase
+            .from('cards')
+            .insert(payloadWithoutUserId)
+            .select()
+            .single();
+          if (error) throw error;
+          result = data;
+        }
+      } else {
+        throw insertErr;
+      }
     }
 
     return {
