@@ -525,31 +525,48 @@ export default function ImportPage() {
         <p className="text-slate-400 max-w-lg mx-auto">Importe extratos bancários ou faturas de cartão via <span className="text-slate-100 font-bold">PDF, CSV ou OFX</span>. Nossa IA cuida do resto.</p>
       </div>
 
-      <Card className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
-        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 max-w-[90%] md:max-w-xl">
-           {realAccounts.map(acc => (
-             <button
-               key={acc.id}
-               type="button"
-               onClick={() => {
-                 setSelectedAccount(acc.name);
-                 setSelectedAccountId(acc.id);
-                 setCustomOrigin(acc.name);
-               }}
-               className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border transition-all ${selectedAccountId === acc.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}
-             >
-               {acc.name}
-             </button>
-           ))}
-           <button
-             type="button"
-             onClick={() => setIsNewAccountModalOpen(true)}
-             className="px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border transition-all bg-indigo-950/80 border-indigo-500/30 text-indigo-300 hover:border-indigo-400 flex items-center gap-1 active:scale-95"
-           >
-             <Plus className="w-3 h-3" />
-             Criar Conta
-           </button>
+      {/* SELETOR DE CONTA / CONTA DE DESTINO */}
+      <div className="space-y-4 bg-slate-900/20 p-5 sm:p-6 rounded-3xl border border-slate-800/80 shadow-xl transition-all duration-300 hover:border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/40 pb-4">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6366f1] block">Etapa 1: Vínculo de Conta Bancária</span>
+            <span className="text-xs font-semibold text-slate-350 block">Escolha a conta onde as transações importadas serão integradas:</span>
+          </div>
+          {selectedAccount && (
+            <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px] font-bold uppercase tracking-wider py-1 px-2.5 rounded-xl self-start sm:self-center">
+              Vinculado: {selectedAccount}
+            </Badge>
+          )}
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
+          {realAccounts.map(acc => (
+            <button
+              key={acc.id}
+              type="button"
+              onClick={() => {
+                setSelectedAccount(acc.name);
+                setSelectedAccountId(acc.id);
+                setCustomOrigin(acc.name);
+              }}
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 active:scale-95 duration-200 ${selectedAccountId === acc.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20 font-extrabold scale-[1.02]' : 'bg-slate-900/50 border-slate-800/70 text-slate-450 hover:text-slate-200 hover:border-slate-700'}`}
+            >
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: acc.color || '#10b981' }} />
+              <span className="truncate max-w-[120px]">{acc.name}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setIsNewAccountModalOpen(true)}
+            className="px-3 sm:px-4 py-2 rounded-xl text-xs font-bold border border-slate-700/50 bg-indigo-950/40 text-indigo-300 hover:border-indigo-400 hover:bg-indigo-950/60 transition-all flex items-center gap-1.5 active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            Criar Conta
+          </button>
+        </div>
+      </div>
+
+      <Card className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
 
         <input 
           type="file" 
