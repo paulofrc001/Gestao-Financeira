@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Upload, FileUp, ShieldCheck, AlertCircle, Save, Trash2, 
   Sparkles, CheckCircle2, TrendingDown, Clock, HelpCircle, 
-  CreditCard, CalendarClock, TrendingUp, Plus, Wallet, Zap
+  CreditCard, CalendarClock, TrendingUp, Plus, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -15,7 +15,6 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
 import { getAccounts, Account, expandInstallmentTransactions, filterDuplicateTransactions, saveAccount, AccountType } from '../lib/accountsCardsStore';
-import { intelligentLocalParser } from '../lib/localStatementParser';
 import { 
   Select, 
   SelectContent, 
@@ -153,24 +152,9 @@ export default function ImportPage() {
             return;
           }
 
+          // Safe call using our robust useGemini hook
           const fileExtension = file.name.split('.').pop() || 'txt';
-          let data: any = null;
-
-          try {
-            data = await parseStatement(text.slice(0, 15000), fileExtension);
-            if (!data || !data.transactions || data.transactions.length === 0) {
-              throw new Error('Nenhuma transação localizada no retorno da IA.');
-            }
-          } catch (aiErr: any) {
-            console.warn('[Import] Falha ou limite de IA (429/Quota). Ativando plano de contingência local...', aiErr);
-            const fallback = intelligentLocalParser(text);
-            if (fallback && fallback.transactions && fallback.transactions.length > 0) {
-              data = fallback;
-              toast.warning('⚠️ Servidores de IA com alta demanda. Ativamos o plano de contingência para processar seu extrato localmente com sucesso!');
-            } else {
-              throw aiErr;
-            }
-          }
+          const data = await parseStatement(text.slice(0, 15000), fileExtension);
 
           if (!data || !data.transactions) {
             throw new Error('Não foi possível identificar nenhuma transação válida no documento.');
@@ -180,11 +164,10 @@ export default function ImportPage() {
           setInsights(data.insights || null);
           setIsCreditCard(data.isCreditCard || false);
           setStep('review');
-          
           toast.success(data.isCreditCard ? 'Fatura de cartão analisada com sucesso!' : 'Extrato processado com sucesso!');
         } catch (innerErr: any) {
           console.error('Fetch error:', innerErr);
-          toast.error('Erro no processamento: ' + innerErr.message);
+          toast.error('Erro na análise por IA: ' + innerErr.message);
         } finally {
           setParsing(false);
         }
@@ -533,7 +516,7 @@ export default function ImportPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-6 sm:py-12 px-4 sm:px-6 space-y-8 animate-in fade-in zoom-in duration-500">
+    <div className="max-w-4xl mx-auto py-12 space-y-8 animate-in fade-in zoom-in duration-500">
       <div className="text-center space-y-4">
         <div className="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-3xl shadow-2xl shadow-indigo-600/20 mb-4">
           <Upload className="text-white w-10 h-10" />
