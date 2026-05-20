@@ -39,7 +39,6 @@ export default function ImportPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [insights, setInsights] = useState<any>(null);
   const [isCreditCard, setIsCreditCard] = useState(false);
-  const [importMode, setImportMode] = useState<'AI' | 'Local'>('AI');
   
   // Dynamic accounts state
   const [realAccounts, setRealAccounts] = useState<Account[]>([]);
@@ -157,24 +156,19 @@ export default function ImportPage() {
           const fileExtension = file.name.split('.').pop() || 'txt';
           let data: any = null;
 
-          if (importMode === 'Local') {
-            console.log('[Import] Executando parsing local offline instantâneo...');
-            data = intelligentLocalParser(text);
-          } else {
-            try {
-              data = await parseStatement(text.slice(0, 15000), fileExtension);
-              if (!data || !data.transactions || data.transactions.length === 0) {
-                throw new Error('Nenhuma transação localizada no retorno da IA.');
-              }
-            } catch (aiErr: any) {
-              console.warn('[Import] Falha ou limite de IA (429/Quota). Ativando plano de contingência local...', aiErr);
-              const fallback = intelligentLocalParser(text);
-              if (fallback && fallback.transactions && fallback.transactions.length > 0) {
-                data = fallback;
-                toast.warning('⚠️ Os servidores de IA estão com alta demanda no momento. A FinnaAI acionou o plano de contingência e processou seu extrato de forma local e instantânea!');
-              } else {
-                throw aiErr;
-              }
+          try {
+            data = await parseStatement(text.slice(0, 15000), fileExtension);
+            if (!data || !data.transactions || data.transactions.length === 0) {
+              throw new Error('Nenhuma transação localizada no retorno da IA.');
+            }
+          } catch (aiErr: any) {
+            console.warn('[Import] Falha ou limite de IA (429/Quota). Ativando plano de contingência local...', aiErr);
+            const fallback = intelligentLocalParser(text);
+            if (fallback && fallback.transactions && fallback.transactions.length > 0) {
+              data = fallback;
+              toast.warning('⚠️ Servidores de IA com alta demanda. Ativamos o plano de contingência para processar seu extrato localmente com sucesso!');
+            } else {
+              throw aiErr;
             }
           }
 
@@ -187,11 +181,7 @@ export default function ImportPage() {
           setIsCreditCard(data.isCreditCard || false);
           setStep('review');
           
-          if (importMode === 'Local') {
-            toast.success(data.isCreditCard ? 'Fatura de cartão processada localmente com sucesso!' : 'Extrato processado localmente com sucesso!');
-          } else {
-            toast.success(data.isCreditCard ? 'Fatura de cartão analisada com sucesso!' : 'Extrato processado com sucesso!');
-          }
+          toast.success(data.isCreditCard ? 'Fatura de cartão analisada com sucesso!' : 'Extrato processado com sucesso!');
         } catch (innerErr: any) {
           console.error('Fetch error:', innerErr);
           toast.error('Erro no processamento: ' + innerErr.message);
@@ -589,61 +579,6 @@ export default function ImportPage() {
           >
             <Plus className="w-4 h-4" />
             Criar Conta
-          </button>
-        </div>
-      </div>
-
-      {/* SELETOR DE MODO DE PROCESSAMENTO */}
-      <div className="space-y-4 bg-slate-900/20 p-5 sm:p-6 rounded-3xl border border-slate-800/80 shadow-xl transition-all duration-300 hover:border-slate-800">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/40 pb-4">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6366f1] block">Etapa 2: Mecanismo de Inteligência</span>
-            <span className="text-xs font-semibold text-slate-350 block">Escolha o motor de extração desejado:</span>
-          </div>
-          <Badge className={`py-1 px-2.5 rounded-xl text-[9px] font-bold uppercase tracking-wider self-start sm:self-center transition-all duration-300 ${importMode === 'Local' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-indigo-5050/10 text-indigo-4550 bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-            {importMode === 'Local' ? '⚡ Ultra Rápido Offline' : '✨ IA Avançada (Gemini)'}
-          </Badge>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-          {/* Opção 1: IA Gemini */}
-          <button
-            type="button"
-            onClick={() => setImportMode('AI')}
-            className={`p-4 rounded-2xl border text-left transition-all duration-200 flex items-start gap-3 relative ${importMode === 'AI' ? 'bg-indigo-950/20 border-indigo-500/50 shadow-lg shadow-indigo-500/5' : 'bg-slate-950/40 border-slate-800/60 opacity-70 hover:opacity-100 hover:border-slate-700'}`}
-          >
-            <div className={`p-2.5 rounded-xl shrink-0 ${importMode === 'AI' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-slate-800 text-slate-500'}`}>
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-xs font-bold text-slate-200">Inteligente (IA Gemini)</div>
-              <div className="text-[11px] text-slate-400 leading-relaxed">
-                Interpretação e categorização rica por inteligência artificial, detecção de recorrências e dicas financeiras.
-              </div>
-            </div>
-            {importMode === 'AI' && (
-              <span className="absolute top-3 right-3 bg-indigo-500 w-1.5 h-1.5 rounded-full" />
-            )}
-          </button>
-
-          {/* Opção 2: Local Instant */}
-          <button
-            type="button"
-            onClick={() => setImportMode('Local')}
-            className={`p-4 rounded-2xl border text-left transition-all duration-200 flex items-start gap-3 relative ${importMode === 'Local' ? 'bg-amber-950/20 border-amber-500/50 shadow-lg shadow-amber-500/5' : 'bg-slate-950/40 border-slate-800/60 opacity-70 hover:opacity-100 hover:border-slate-700'}`}
-          >
-            <div className={`p-2.5 rounded-xl shrink-0 ${importMode === 'Local' ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-800 text-slate-500'}`}>
-              <Zap className="w-5 h-5 animate-pulse" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-xs font-bold text-slate-200">Local Instantâneo (Sem Limites/Evita 429)</div>
-              <div className="text-[11px] text-slate-400 leading-relaxed">
-                Leitura offline instantânea de qualquer CSV/OFX/TXT local. Extremamente veloz, seguro e 100% livre de cotas ou falhas.
-              </div>
-            </div>
-            {importMode === 'Local' && (
-              <span className="absolute top-3 right-3 bg-amber-500 w-1.5 h-1.5 rounded-full" />
-            )}
           </button>
         </div>
       </div>
