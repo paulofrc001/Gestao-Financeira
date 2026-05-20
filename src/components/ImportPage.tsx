@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Upload, FileUp, ShieldCheck, AlertCircle, Save, Trash2, 
   Sparkles, CheckCircle2, TrendingDown, Clock, HelpCircle, 
-  CreditCard, CalendarClock, TrendingUp
+  CreditCard, CalendarClock, TrendingUp, Plus, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -14,7 +14,7 @@ import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
-import { getAccounts, Account, expandInstallmentTransactions, filterDuplicateTransactions } from '../lib/accountsCardsStore';
+import { getAccounts, Account, expandInstallmentTransactions, filterDuplicateTransactions, saveAccount, AccountType } from '../lib/accountsCardsStore';
 import { 
   Select, 
   SelectContent, 
@@ -22,6 +22,14 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -36,6 +44,65 @@ export default function ImportPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [customOrigin, setCustomOrigin] = useState('');
+
+  // States for creating a brand new account inline
+  const [isNewAccountModalOpen, setIsNewAccountModalOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountType, setNewAccountType] = useState<AccountType>('Checking');
+  const [newAccountBalance, setNewAccountBalance] = useState('');
+  const [newAccountColor, setNewAccountColor] = useState('#10b981');
+
+  const ACCOUNT_COLORS = [
+    '#820ad1', // Nubank Purple
+    '#ec7000', // Itaú Orange
+    '#003399', // Bradesco Blue
+    '#008037', // Santander Red/Green
+    '#10b981', // Cash Green
+    '#6366f1', // Indigo Neon
+    '#f59e0b', // Amber
+    '#000000', // XP black
+  ];
+
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAccountName.trim()) {
+      toast.error('O nome da conta é obrigatório.');
+      return;
+    }
+
+    const balanceNum = parseFloat(newAccountBalance) || 0;
+
+    try {
+      const created = await saveAccount({
+        name: newAccountName.trim(),
+        type: newAccountType,
+        balance: balanceNum,
+        currency: 'BRL',
+        color: newAccountColor
+      });
+
+      toast.success(`Conta "${created.name}" criada de forma instantânea e vinculada aos seus lançamentos!`);
+      
+      // Refresh the options
+      const accs = await getAccounts();
+      setRealAccounts(accs);
+      
+      // Select the new account
+      setSelectedAccountId(created.id);
+      setSelectedAccount(created.name);
+      setCustomOrigin(created.name);
+
+      // Reset states
+      setNewAccountName('');
+      setNewAccountType('Checking');
+      setNewAccountBalance('');
+      setNewAccountColor('#10b981');
+      setIsNewAccountModalOpen(false);
+    } catch (err: any) {
+      console.error('Erro ao cadastrar conta:', err);
+      toast.error('Não foi possível registrar a conta: ' + err.message);
+    }
+  };
 
   const { parseStatement, loading: aiLoading, error: aiError } = useGemini();
 
@@ -299,6 +366,15 @@ export default function ImportPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <Button 
+                  type="button" 
+                  onClick={() => setIsNewAccountModalOpen(true)}
+                  className="bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700/40 text-indigo-400 font-bold h-8 px-2.5 rounded-lg flex items-center gap-1 transition-all text-[10px] shrink-0 font-sans"
+                  title="Criar nova conta"
+                >
+                  <Plus className="w-3 h-3" />
+                  Nova
+                </Button>
               </div>
             </h2>
             <p className="text-slate-400 text-sm">Validando {transactions.length} transações identificadas pela FinnaAI.</p>
@@ -450,7 +526,7 @@ export default function ImportPage() {
       </div>
 
       <Card className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
-        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 max-w-[90%] md:max-w-md">
+        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 max-w-[90%] md:max-w-xl">
            {realAccounts.map(acc => (
              <button
                key={acc.id}
@@ -465,6 +541,14 @@ export default function ImportPage() {
                {acc.name}
              </button>
            ))}
+           <button
+             type="button"
+             onClick={() => setIsNewAccountModalOpen(true)}
+             className="px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border transition-all bg-indigo-950/80 border-indigo-500/30 text-indigo-300 hover:border-indigo-400 flex items-center gap-1 active:scale-95"
+           >
+             <Plus className="w-3 h-3" />
+             Criar Conta
+           </button>
         </div>
 
         <input 
@@ -520,6 +604,102 @@ export default function ImportPage() {
          <FeatureCard icon={Clock} title="Assinaturas Ocultas" desc="Detectamos cobranças recorrentes que você pode ter esquecido." />
          <FeatureCard icon={AlertCircle} title="Detector de Resíduos" desc="Identificamos taxas bancárias e serviços desnecessários." />
       </div>
+
+      {/* Diálogo de Criação de Conta Bancária ao importar */}
+      <Dialog open={isNewAccountModalOpen} onOpenChange={setIsNewAccountModalOpen}>
+        <DialogContent className="sm:max-w-[420px] border-slate-800 rounded-3xl p-0 max-h-[90vh] overflow-y-auto bg-[#09090B] text-slate-100">
+          <DialogHeader className="px-8 py-6 bg-[#030303] border-b border-slate-800/60 shadow-inner">
+            <DialogTitle className="text-lg font-bold tracking-tight text-slate-50 flex items-center gap-2">
+              <Plus className="w-5 h-5 text-indigo-400" />
+              Nova Conta Bancária
+            </DialogTitle>
+            <DialogDescription className="text-slate-400 text-xs leading-relaxed">
+              Crie uma nova conta corrente ou poupança de forma instantânea para vincular e organizar suas despesas importadas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateAccount} className="p-8 space-y-5 bg-[#09090B]">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Nome da Conta / Instituição</label>
+              <Input 
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                placeholder="Ex: Itaú, Nubank, Banco Inter"
+                className="bg-[#0c0c0e] border-slate-800 text-slate-50 rounded-xl h-11 px-4 placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-xs"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Tipo de Conta</label>
+                <Select value={newAccountType} onValueChange={(val: any) => setNewAccountType(val)}>
+                  <SelectTrigger className="bg-[#0c0c0e] border-slate-800 text-xs h-11 px-4 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-slate-100 font-medium">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
+                    <SelectItem value="Checking" className="text-xs">Corrente</SelectItem>
+                    <SelectItem value="Savings" className="text-xs">Poupança</SelectItem>
+                    <SelectItem value="Investment" className="text-xs">Investimento</SelectItem>
+                    <SelectItem value="Cash" className="text-xs">Dinheiro (Espécie)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Saldo Inicial (R$)</label>
+                <Input 
+                  type="number"
+                  step="0.01"
+                  value={newAccountBalance}
+                  onChange={(e) => setNewAccountBalance(e.target.value)}
+                  placeholder="0,00"
+                  className="bg-[#0c0c0e] border-slate-800 text-slate-50 rounded-xl h-11 px-4 placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Identidade Visual (Cor)</label>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {ACCOUNT_COLORS.map((colorHex) => (
+                  <button
+                    key={colorHex}
+                    type="button"
+                    onClick={() => setNewAccountColor(colorHex)}
+                    className="w-8 h-8 rounded-full border-2 transition-all hover:scale-110 active:scale-95 flex items-center justify-center relative shadow-sm"
+                    style={{ 
+                      backgroundColor: colorHex,
+                      borderColor: newAccountColor === colorHex ? '#ffffff' : 'transparent'
+                    }}
+                  >
+                    {newAccountColor === colorHex && (
+                      <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter className="pt-4 border-t border-slate-800/60 flex justify-end gap-2">
+              <Button 
+                type="button" 
+                variant="ghost" 
+                onClick={() => setIsNewAccountModalOpen(false)} 
+                className="rounded-xl text-slate-400 hover:text-slate-200"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                type="submit" 
+                className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5"
+              >
+                Criar e Vincular
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
