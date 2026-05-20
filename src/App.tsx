@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save, Pencil } from 'lucide-react';
+import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save, Pencil, FileDown, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -971,6 +971,136 @@ function TransactionsPage() {
      return Array.from(sourcesSet).sort();
    }, [transactions]);
 
+   const handleExportExcel = () => {
+     if (filteredTransactions.length === 0) {
+       toast.error('Nenhuma transação disponível para exportar no período ou filtros selecionados.');
+       return;
+     }
+     
+     const headers = ['Descrição', 'Data', 'Tipo', 'Origem', 'Categoria', 'Status', 'Valor (R$)'];
+     const rows = filteredTransactions.map(tx => [
+       tx.description,
+       format(new Date(tx.date), 'dd/MM/yyyy'),
+       tx.type === 'income' ? 'Receita' : 'Despesa',
+       tx.source || 'Manual',
+       tx.category,
+       tx.status === 'completed' ? 'Concluído' : 'Pendente',
+       tx.amount.toFixed(2).replace('.', ',')
+     ]);
+
+     const csvContent = [
+       headers.join(';'),
+       ...rows.map(e => e.join(';'))
+     ].join('\n');
+
+     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+     const url = URL.createObjectURL(blob);
+     const link = document.createElement('a');
+     link.setAttribute('href', url);
+     link.setAttribute('download', `Finna_Transacoes_${format(new Date(), 'dd_MM_yyyy')}.csv`);
+     document.body.appendChild(link);
+     link.click();
+     document.body.removeChild(link);
+     toast.success('Excel/CSV exportado com sucesso!');
+   };
+
+   const handleExportPDF = () => {
+     if (filteredTransactions.length === 0) {
+       toast.error('Nenhuma transação disponível para exportar/imprimir.');
+       return;
+     }
+
+     let periodLabel = "Todos os períodos";
+     if (dateFilter.type === 'custom' && dateFilter.start && dateFilter.end) {
+       periodLabel = format(new Date(dateFilter.start), 'dd/MM/yyyy') + ' a ' + format(new Date(dateFilter.end), 'dd/MM/yyyy');
+     } else if (dateFilter.type !== 'all') {
+       const labels: Record<string, string> = {
+         '7d': 'Últimos 7 dias',
+         '30d': 'Últimos 30 dias',
+         'thisMonth': 'Este Mês',
+         'lastMonth': 'Mês Passado',
+         'thisYear': 'Este Ano'
+       };
+       periodLabel = labels[dateFilter.type] || dateFilter.type;
+     }
+
+     const totalIncome = filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.amount), 0);
+     const totalExpense = filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + Math.abs(Number(t.amount)), 0);
+     const balance = totalIncome - totalExpense;
+
+     const printWindow = window.open('', '_blank');
+     if (!printWindow) {
+       toast.error('Por favor, autorize popups no seu navegador para exportar o relatório PDF.');
+       return;
+     }
+
+     let formattedRows = '';
+     filteredTransactions.forEach((tx, idx) => {
+       const bgColor = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+       const colorStyle = tx.type === 'income' ? '#059669' : '#dc2626';
+       const sign = tx.type === 'income' ? '+' : '-';
+       const valStr = sign + ' R$ ' + Math.abs(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+       const dateStr = format(new Date(tx.date), 'dd/MM/yyyy');
+       const sourceStr = tx.source || 'Manual';
+
+       formattedRows += '<tr style="background-color: ' + bgColor + '; border-bottom: 1px solid #e2e8f0;">' +
+         '<td style="padding: 10px 12px; font-weight: 500; font-family: sans-serif; font-size: 13px; color: #1e293b;">' + tx.description + '</td>' +
+         '<td style="padding: 10px 12px; font-size: 13px; color: #64748b;">' + dateStr + '</td>' +
+         '<td style="padding: 10px 12px; font-size: 13px; color: #64748b; text-transform: capitalize;">' + tx.category + '</td>' +
+         '<td style="padding: 10px 12px; font-size: 13px; color: #4338ca; font-weight: 500;">' + sourceStr + '</td>' +
+         '<td style="padding: 10px 12px; font-size: 13px; text-transform: uppercase; font-weight: bold; color: ' + colorStyle + '; text-align: right;">' + valStr + '</td>' +
+         '</tr>';
+     });
+
+     let html = '<!DOCTYPE html><html><head><title>Finna - Relatório Financeiro</title>';
+     html += '<style>';
+     html += '@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");';
+     html += 'body { font-family: "Inter", sans-serif; margin: 40px; color: #1e293b; background-color: #ffffff; }';
+     html += '.header-container { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }';
+     html += '.title { font-size: 26px; font-weight: 700; color: #4f46e5; letter-spacing: -0.025em; margin: 0; }';
+     html += '.subtitle { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; font-weight: 600; margin-top: 4px; }';
+     html += '.meta { text-align: right; font-size: 12px; color: #64748b; line-height: 1.5; }';
+     html += '.summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 35px; }';
+     html += '.card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background-color: #f8fafc; }';
+     html += '.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: #64748b; margin: 0 0 6px 0; }';
+     html += '.card-value { font-size: 18px; font-weight: 700; margin: 0; }';
+     html += '.text-income { color: #059669; }';
+     html += '.text-expense { color: #dc2626; }';
+     html += '.text-balance { color: #1e1b4b; }';
+     html += 'table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }';
+     html += 'th { background-color: #0f172a; color: #ffffff; text-align: left; padding: 12px; font-size: 11px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; }';
+     html += 'th:last-child { text-align: right; }';
+     html += 'td:last-child { text-align: right; }';
+     html += '.footer { text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; margin-top: 50px; }';
+     html += '</style>';
+     html += '</head><body>';
+     html += '<div class="header-container">';
+     html += '<div><h1 class="title">FINNA</h1><div class="subtitle">Gestão Financeira Consolidada</div></div>';
+     html += '<div class="meta">';
+     html += '<div><strong>Período:</strong> ' + periodLabel + '</div>';
+     html += '<div><strong>Gerado em:</strong> ' + format(new Date(), 'dd/MM/yyyy HH:mm') + '</div>';
+     html += '<div><strong>Filtro de fluxo:</strong> ' + (filter === 'expense' ? 'Apenas Despesas' : filter === 'income' ? 'Apenas Receitas' : 'Todas as Transações') + '</div>';
+     html += '</div></div>';
+
+     html += '<div class="summary-cards">';
+     html += '<div class="card"><h3 class="card-title">Total Receitas</h3><p class="card-value text-income">R$ ' + totalIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</p></div>';
+     html += '<div class="card"><h3 class="card-title">Total Despesas</h3><p class="card-value text-expense">R$ ' + totalExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</p></div>';
+     html += '<div class="card" style="border-left: 4px solid #4f46e5;"><h3 class="card-title">Saldo Líquido</h3><p class="card-value text-balance">R$ ' + balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</p></div>';
+     html += '</div>';
+
+     html += '<table><thead><tr><th style="border-top-left-radius: 6px; border-bottom-left-radius: 6px;">Descrição</th><th>Data</th><th>Categoria</th><th>Origem</th><th style="border-top-right-radius: 6px; border-bottom-right-radius: 6px; text-align: right;">Valor</th></tr></thead><tbody>';
+     html += formattedRows;
+     html += '</tbody></table>';
+
+     html += '<div style="text-align: right; margin-right: 12px; font-size: 13px; color: #475569;"><strong>Quantidade de registros:</strong> ' + filteredTransactions.length + ' item(ns)</div>';
+     html += '<div class="footer">Documento gerado através do Finna AI Financial Ecosystem. Todos os direitos reservados.</div>';
+     html += '<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); };</script>';
+     html += '</body></html>';
+
+     printWindow.document.write(html);
+     printWindow.document.close();
+   };
+
    const handleCreateCategory = async () => {
      if (!newCategoryName.trim()) {
        toast.error('Informe o nome da categoria');
@@ -1158,15 +1288,37 @@ function TransactionsPage() {
                   </div>
                </div>
 
-               {/* Quick Button to add category */}
-               <Button 
-                  onClick={() => setIsNewCategoryOpen(true)}
-                  variant="outline"
-                  className="rounded-xl border border-slate-800 hover:text-white hover:bg-indigo-600 hover:border-indigo-500 font-bold text-[10px] uppercase tracking-wider h-9 px-3 transition-all"
-               >
-                  <Plus className="w-3.5 h-3.5 mr-1 text-indigo-400 group-hover:text-white" />
-                  Nova Categoria
-               </Button>
+               {/* Quick Action Buttons */}
+               <div className="flex flex-wrap items-center gap-2">
+                  <Button 
+                     onClick={handleExportExcel}
+                     variant="outline"
+                     className="rounded-xl border border-slate-800 hover:text-white hover:bg-emerald-600 hover:border-emerald-500 font-bold text-[10px] uppercase tracking-wider h-9 px-3 transition-all group/excel"
+                     title="Exportar para Excel"
+                  >
+                     <FileDown className="w-3.5 h-3.5 mr-1.5 text-emerald-400 group-hover/excel:text-white transition-colors" />
+                     Excel
+                  </Button>
+
+                  <Button 
+                     onClick={handleExportPDF}
+                     variant="outline"
+                     className="rounded-xl border border-slate-800 hover:text-white hover:bg-rose-600 hover:border-rose-500 font-bold text-[10px] uppercase tracking-wider h-9 px-3 transition-all group/pdf"
+                     title="Exportar para PDF"
+                  >
+                     <Printer className="w-3.5 h-3.5 mr-1.5 text-rose-400 group-hover/pdf:text-white transition-colors" />
+                     PDF
+                  </Button>
+
+                  <Button 
+                     onClick={() => setIsNewCategoryOpen(true)}
+                     variant="outline"
+                     className="rounded-xl border border-slate-800 hover:text-white hover:bg-indigo-600 hover:border-indigo-500 font-bold text-[10px] uppercase tracking-wider h-9 px-3 transition-all group/cat"
+                  >
+                     <Plus className="w-3.5 h-3.5 mr-1.5 text-indigo-400 group-hover/cat:text-white transition-colors" />
+                     Nova Categoria
+                  </Button>
+               </div>
             </div>
 
             <CardContent className="p-0">
