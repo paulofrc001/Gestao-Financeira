@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save, Pencil, FileDown, Printer } from 'lucide-react';
+import { Home, LayoutDashboard, ReceiptText, Target, Wallet, BrainCircuit, Heart, Settings, Bell, Menu, X, Plus, ChevronRight, TrendingUp, TrendingDown, DollarSign, FileUp, Upload, CheckCircle2, AlertCircle, Trash2, ShieldCheck, Sparkles, Save, Pencil, FileDown, Printer, CreditCard, Layers, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -272,6 +272,7 @@ function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ type: 'all' });
   const [loading, setLoading] = useState(true);
+  const [segmentFilter, setSegmentFilter] = useState<'all' | 'accounts_manual' | 'credit_card'>('all');
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -321,20 +322,44 @@ function Dashboard() {
 
   // Filter transactions dynamically
   const filteredTransactions = React.useMemo(() => {
-    return filterTxsByDate(allTransactions, dateFilter);
-  }, [allTransactions, dateFilter]);
+    let txs = filterTxsByDate(allTransactions, dateFilter);
+    if (segmentFilter === 'accounts_manual') {
+      txs = txs.filter((t: any) => !t.card_id);
+    } else if (segmentFilter === 'credit_card') {
+      txs = txs.filter((t: any) => !!t.card_id);
+    }
+    return txs;
+  }, [allTransactions, dateFilter, segmentFilter]);
 
   // Compute stats reactively
   const stats = React.useMemo(() => {
-    const income = filteredTransactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + Number(t.amount), 0);
-    const expense = filteredTransactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + Math.abs(Number(t.amount)), 0);
+    // Current bank accounts stats (no card)
+    const bankTransactions = filteredTransactions.filter((t: any) => !t.card_id);
+    const bankIncome = bankTransactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + Number(t.amount), 0);
+    const bankExpense = bankTransactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + Math.abs(Number(t.amount)), 0);
+    const bankBalance = bankIncome - bankExpense;
+
+    // Credit card stats (has card)
+    const cardTransactions = filteredTransactions.filter((t: any) => !!t.card_id);
+    const cardIncome = cardTransactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + Number(t.amount), 0);
+    const cardExpense = cardTransactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + Math.abs(Number(t.amount)), 0);
+
+    const income = segmentFilter === 'credit_card' ? cardIncome : bankIncome;
+    const expense = segmentFilter === 'credit_card' ? cardExpense : bankExpense;
+    const balance = segmentFilter === 'credit_card' ? -cardExpense : bankBalance;
+
     return {
-      balance: income - expense,
+      balance,
       income,
       expense,
+      bankBalance,
+      bankIncome,
+      bankExpense,
+      cardExpense,
+      cardIncome,
       recent: filteredTransactions.slice(0, 4)
     };
-  }, [filteredTransactions]);
+  }, [filteredTransactions, segmentFilter]);
 
   // Group by month or day intervals for the Area chart
   const flowChartData = React.useMemo(() => {
@@ -637,6 +662,10 @@ function Dashboard() {
     'bg-teal-500'
   ];
 
+  const installmentCount = React.useMemo(() => {
+    return filteredTransactions.filter(t => t.installments && typeof t.installments === 'string' && t.installments.includes('/')).length;
+  }, [filteredTransactions]);
+
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
       <PeriodFilter 
@@ -644,12 +673,74 @@ function Dashboard() {
         onChange={(f) => setDateFilter(f)} 
       />
 
+      {/* Segment Selector for separating Checking Accounts & Credit Card */}
+      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between pb-2 gap-4 bg-slate-900/15 p-5 border border-slate-800/40 rounded-3xl">
+        <div className="space-y-1">
+          <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-indigo-400" />
+            Canal de Operação Finna
+          </h2>
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black italic">Separe seus canais para controle preciso de contas correntes e cartões de crédito</p>
+        </div>
+        <div className="bg-slate-950 p-1.5 rounded-2xl border border-slate-800/80 flex flex-wrap gap-1 w-full xl:w-auto">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setSegmentFilter('all')}
+            className={`rounded-xl px-4 py-1.5 h-8 text-[9px] font-bold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5 flex-1 xl:flex-none justify-center ${segmentFilter === 'all' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/55'}`}
+          >
+            <LayoutDashboard className="w-3 h-3" />
+            Consolidado
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setSegmentFilter('accounts_manual')}
+            className={`rounded-xl px-4 py-1.5 h-8 text-[9px] font-bold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5 flex-1 xl:flex-none justify-center ${segmentFilter === 'accounts_manual' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/55'}`}
+          >
+            <Wallet className="w-3 h-3" />
+            Contas Correntes
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setSegmentFilter('credit_card')}
+            className={`rounded-xl px-4 py-1.5 h-8 text-[9px] font-bold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5 flex-1 xl:flex-none justify-center ${segmentFilter === 'credit_card' ? 'bg-rose-600 text-white shadow-md shadow-rose-600/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/55'}`}
+          >
+            <CreditCard className="w-3 h-3" />
+            Cartão de Crédito
+          </Button>
+        </div>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Saldo em Contas" value={loading ? "..." : `R$ ${stats.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={Wallet} trend="up" />
-        <StatCard title="Receitas Mensais" value={loading ? "..." : `R$ ${stats.income.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={TrendingUp} trend="up" color="green" />
-        <StatCard title="Despesas Mensais" value={loading ? "..." : `R$ ${stats.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="+0%" icon={TrendingDown} trend="down" color="red" />
-        <StatCard title="Economia do Mês" value={loading ? "..." : `R$ ${(stats.income - stats.expense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="0%" icon={DollarSign} trend="up" color="blue" subtitle="da meta mensal" />
+        {segmentFilter === 'all' && (
+          <>
+            <StatCard title="Saldo em Contas" value={loading ? "..." : `R$ ${stats.bankBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={Wallet} trend="up" />
+            <StatCard title="Fatura Estimada" value={loading ? "..." : `R$ ${stats.cardExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={CreditCard} trend="down" color="red" subtitle="Gastos do mês no cartão" />
+            <StatCard title="Receitas Totais" value={loading ? "..." : `R$ ${stats.bankIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={TrendingUp} trend="up" color="green" />
+            <StatCard title="Resultado Consolidado" value={loading ? "..." : `R$ ${(stats.bankIncome - stats.bankExpense - stats.cardExpense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={DollarSign} trend={(stats.bankIncome - stats.bankExpense - stats.cardExpense) >= 0 ? "up" : "down"} color={(stats.bankIncome - stats.bankExpense - stats.cardExpense) >= 0 ? "green" : "red"} subtitle="Saldo com faturas deduzidas" />
+          </>
+        )}
+
+        {segmentFilter === 'accounts_manual' && (
+          <>
+            <StatCard title="Saldo Bancário" value={loading ? "..." : `R$ ${stats.bankBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={Wallet} trend="up" />
+            <StatCard title="Entradas de Caixa" value={loading ? "..." : `R$ ${stats.bankIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={TrendingUp} trend="up" color="green" />
+            <StatCard title="Saídas de Caixa" value={loading ? "..." : `R$ ${stats.bankExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={TrendingDown} trend="down" color="red" />
+            <StatCard title="Saldo Líquido Período" value={loading ? "..." : `R$ ${(stats.bankIncome - stats.bankExpense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={DollarSign} trend={(stats.bankIncome - stats.bankExpense) >= 0 ? "up" : "down"} color={(stats.bankIncome - stats.bankExpense) >= 0 ? "green" : "blue"} subtitle="Desconsiderando cartão" />
+          </>
+        )}
+
+        {segmentFilter === 'credit_card' && (
+          <>
+            <StatCard title="Total Fatura" value={loading ? "..." : `R$ ${stats.cardExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={CreditCard} trend="down" color="red" subtitle="Soma de gastos com cartão" />
+            <StatCard title="Créditos / Estornos" value={loading ? "..." : `R$ ${stats.cardIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={TrendingUp} trend="up" color="green" />
+            <StatCard title="Operações Ativas" value={loading ? "..." : `${filteredTransactions.length} itens`} change="" icon={Layers} trend="up" subtitle="Total de compras do canal" />
+            <StatCard title="Próximas Parcelas" value={`${installmentCount} parcelas`} change="" icon={Calendar} trend="up" color="blue" subtitle="Validadas em faturas futuras" />
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
