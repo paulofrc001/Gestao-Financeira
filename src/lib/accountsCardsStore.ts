@@ -571,3 +571,114 @@ export function expandInstallmentTransactions(transactions: any[], isSupabaseCon
   return result;
 }
 
+export function isDuplicateTransaction(newTx: any, existingTx: any, cardId?: string | null): boolean {
+  // If cardId is specified, check card matching
+  if (cardId) {
+    if (existingTx.card_id !== cardId) return false;
+  } else if (newTx.card_id) {
+    if (existingTx.card_id !== newTx.card_id) return false;
+  } else if (newTx.account_id) {
+    if (existingTx.account_id !== newTx.account_id) return false;
+  }
+
+  // 1. Amount matching (absolute floats, close under 0.02 delta)
+  const newAmt = Math.abs(Number(newTx.amount || 0));
+  const extAmt = Math.abs(Number(existingTx.amount || 0));
+  if (Math.abs(newAmt - extAmt) > 0.02) {
+    return false;
+  }
+
+  // 2. Installment checks & extraction of base description
+  const extractParts = (desc: string) => {
+    if (!desc) return { base: '', installment: null };
+    const match = desc.match(/\s*[(]?(\d+)\s*\/\s*(\d+)[)]?\s*$/) || desc.match(/\s*[(]?(\d+)\s+de\s+(\d+)[)]?\s*$/i);
+    if (match) {
+      return {
+        base: desc.replace(match[0], '').replace(/\s+/g, ' ').trim().toLowerCase(),
+        installment: `${match[1]}/${match[2]}`
+      };
+    }
+    return {
+      base: desc.replace(/\s+/g, ' ').trim().toLowerCase(),
+      installment: null
+    };
+  };
+
+  const newParts = extractParts(newTx.description);
+  const extParts = extractParts(existingTx.description);
+
+  // If one of them has an installment coordinate, we must match base descriptions AND the coordinates
+  if (newParts.installment || extParts.installment) {
+    const basesMatch = newParts.base === extParts.base || 
+                       newParts.base.includes(extParts.base) || 
+                       extParts.base.includes(newParts.base);
+    
+    if (basesMatch && newParts.installment === extParts.installment) {
+      return true;
+    }
+    return false;
+  }
+
+  // 3. Flat transactions description sanitization & mapping
+  const sanitize = (term: string) => term.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+  const newClean = sanitize(newTx.description);
+  const extClean = sanitize(existingTx.description);
+
+  const descMatch = newClean === extClean || 
+                    newClean.includes(extClean) || 
+                    extClean.includes(newClean);
+
+  if (!descMatch) return false;
+
+  // 4. Date Proximity Check within 4 days (to tolerate weekends bank delays)
+  if (newTx.date && existingTx.date) {
+    try {
+      const d1 = new Date(newTx.date + 'T12:00:00');
+      const d2 = new Date(existingTx.date + 'T12:00:00');
+      const diffMs = Math.abs(d1.getTime() - d2.getTime());
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      if (diffDays <= 4) {
+        return true;
+      }
+    } catch {
+      return newTx.date === existingTx.date;
+    }
+  }
+
+  return false;
+}
+
+export function filterDuplicateTransactions(
+  newTxs: any[],
+  existingTxs: any[],
+  cardId?: string | null
+): {
+  finalTransactions: any[];
+  skippedCount: number;
+  skippedDescriptions: string[];
+} {
+  const finalTransactions: any[] = [];
+  const skippedDescriptions: string[] = [];
+  let skippedCount = 0;
+
+  for (const t of newTxs) {
+    // See if it matches any transaction inside existingTxs
+    const duplicate = existingTxs.some(ext => isDuplicateTransaction(t, ext, cardId));
+    if (duplicate) {
+      skippedCount++;
+      const fmtDesc = t.description;
+      if (!skippedDescriptions.includes(fmtDesc)) {
+        skippedDescriptions.push(fmtDesc);
+      }
+    } else {
+      finalTransactions.push(t);
+    }
+  }
+
+  return {
+    finalTransactions,
+    skippedCount,
+    skippedDescriptions
+  };
+}
+

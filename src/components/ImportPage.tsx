@@ -14,7 +14,7 @@ import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
-import { getAccounts, Account, expandInstallmentTransactions } from '../lib/accountsCardsStore';
+import { getAccounts, Account, expandInstallmentTransactions, filterDuplicateTransactions } from '../lib/accountsCardsStore';
 import { 
   Select, 
   SelectContent, 
@@ -157,13 +157,24 @@ export default function ImportPage() {
           };
         });
 
+        // Load existing transactions in Supabase to do a depara check
+        const { data: dbTxList } = await supabase.from('transactions').select('*');
+        const existingList = dbTxList || [];
+
         const txsToSave = expandInstallmentTransactions(rawTxs, true);
 
-        const { error } = await supabase.from('transactions').insert(txsToSave);
-        if (error) throw error;
+        const { finalTransactions, skippedCount } = filterDuplicateTransactions(
+          txsToSave,
+          existingList
+        );
 
-        // Sum up total import amounts to update balance
-        const totalDelta = transactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
+        if (finalTransactions.length > 0) {
+          const { error } = await supabase.from('transactions').insert(finalTransactions);
+          if (error) throw error;
+        }
+
+        // Sum up total import amounts to update balance (excluding skipped ones)
+        const totalDelta = finalTransactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
         if (matchedAcc && totalDelta !== 0) {
           const { error: balanceErr } = await supabase
             .from('accounts')
@@ -172,7 +183,11 @@ export default function ImportPage() {
           if (balanceErr) console.error('Error updating account balance in DB:', balanceErr);
         }
 
-        toast.success(`${txsToSave.length} transações salvas com sucesso no banco de dados!`);
+        if (skippedCount > 0) {
+          toast.success(`${finalTransactions.length} transações salvas com sucesso no banco de dados. ${skippedCount} duplicadas foram detectadas e evitadas (depara).`);
+        } else {
+          toast.success(`${txsToSave.length} transações salvas com sucesso no banco de dados!`);
+        }
       } else {
         // 2. OFFLINE / LOCALSTORAGE MODE
         const localSaved = localStorage.getItem('finna_transactions');
@@ -198,10 +213,15 @@ export default function ImportPage() {
 
         const generatedTxs = expandInstallmentTransactions(rawLocalTxs, false);
 
-        localStorage.setItem('finna_transactions', JSON.stringify([...generatedTxs, ...existingList]));
+        const { finalTransactions, skippedCount } = filterDuplicateTransactions(
+          generatedTxs,
+          existingList
+        );
+
+        localStorage.setItem('finna_transactions', JSON.stringify([...finalTransactions, ...existingList]));
 
         // Update local balance of account
-        const totalDelta = transactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
+        const totalDelta = finalTransactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
         if (matchedAcc && totalDelta !== 0) {
           const allLocalAccs = realAccounts.map(a => {
             if (a.id === matchedAcc.id) {
@@ -212,7 +232,11 @@ export default function ImportPage() {
           localStorage.setItem('finna_accounts', JSON.stringify(allLocalAccs));
         }
 
-        toast.success(`${transactions.length} transações salvas localmente no modo demonstração!`);
+        if (skippedCount > 0) {
+          toast.success(`${finalTransactions.length} transações salvas. ${skippedCount} duplicadas foram detectadas e evitadas (depara).`);
+        } else {
+          toast.success(`${transactions.length} transações salvas localmente no modo demonstração!`);
+        }
       }
 
       setStep('upload');

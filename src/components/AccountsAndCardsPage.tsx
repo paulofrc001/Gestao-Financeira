@@ -53,7 +53,8 @@ import {
   formatBillingMonthLabel,
   getInvoiceBillingMonth,
   isUUID,
-  expandInstallmentTransactions
+  expandInstallmentTransactions,
+  filterDuplicateTransactions
 } from '../lib/accountsCardsStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
@@ -303,8 +304,8 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
         brand: cardFormData.brand
       });
 
-      // 2. Compute text-statement parsing if import statement is selected and not editing
-      if (importStatement && !editingCard) {
+      // 2. Compute text-statement parsing if import statement is selected
+      if (importStatement) {
         let textToParse = pastedText;
         let fileType = 'txt';
 
@@ -377,19 +378,31 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                 return dbTx;
               });
 
-            // Persist the transaction items with predictive installment calculations
+            // Persist the transaction items with predictive installment calculations after filtering duplicates
             const finalTxsToSave = expandInstallmentTransactions(transactionsToBeSaved, isSupabaseConfigured);
 
-            if (isSupabaseConfigured) {
-              const { error: batchInsertError } = await supabase.from('transactions').insert(finalTxsToSave);
-              if (batchInsertError) throw batchInsertError;
-            } else {
-              const localStorageTransactions = localStorage.getItem('finna_transactions');
-              const txsList = localStorageTransactions ? JSON.parse(localStorageTransactions) : [];
-              localStorage.setItem('finna_transactions', JSON.stringify([...finalTxsToSave, ...txsList]));
+            const { finalTransactions, skippedCount } = filterDuplicateTransactions(
+              finalTxsToSave,
+              allTransactions,
+              assignedCardId
+            );
+
+            if (finalTransactions.length > 0) {
+              if (isSupabaseConfigured) {
+                const { error: batchInsertError } = await supabase.from('transactions').insert(finalTransactions);
+                if (batchInsertError) throw batchInsertError;
+              } else {
+                const localStorageTransactions = localStorage.getItem('finna_transactions');
+                const txsList = localStorageTransactions ? JSON.parse(localStorageTransactions) : [];
+                localStorage.setItem('finna_transactions', JSON.stringify([...finalTransactions, ...txsList]));
+              }
             }
 
-            toast.success(`Sucesso absoluto! Cartão criado e ${parsedData.transactions.length} despesas importadas e categorizadas por IA!`, { id: cardParseToastId });
+            if (skippedCount > 0) {
+              toast.success(`Sucesso absoluto! ${finalTransactions.length} despesas novas importadas e ${skippedCount} duplicidades evitadas (depara)!`, { id: cardParseToastId, duration: 6000 });
+            } else {
+              toast.success(`Sucesso absoluto! ${finalTransactions.length} despesas novas importadas e categorizadas por IA!`, { id: cardParseToastId });
+            }
           } else {
             toast.dismiss(cardParseToastId);
             toast.warning('O Gemini não encontrou transações legíveis no documento enviado.', { duration: 5000 });
@@ -1046,9 +1059,8 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
             </div>
 
             {/* Smart Interactive PDF or Text Invoice Statement AI Loader */}
-            {!editingCard && (
-              <div className="pt-2 border-t border-slate-900/60 space-y-3">
-                <div className="flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-2xl transition">
+            <div className="pt-2 border-t border-slate-900/60 space-y-3">
+              <div className="flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-2xl transition">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400">
                       <Sparkles className="w-4 h-4 animate-pulse" />
@@ -1163,8 +1175,7 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
 
           <DialogFooter className="px-8 py-5 border-t border-slate-800 bg-slate-900/10 flex justify-end gap-2">
             <Button variant="ghost" disabled={isParsingCC} onClick={() => setIsCardModalOpen(false)} className="rounded-xl text-slate-400">Cancelar</Button>
