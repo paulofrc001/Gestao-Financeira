@@ -837,7 +837,7 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
 
       {/* ACCOUNT NEW/EDIT DIALOG */}
       <Dialog open={isAccountModalOpen} onOpenChange={setIsAccountModalOpen}>
-        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 overflow-hidden bg-[#09090B] text-slate-100">
+        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 max-h-[85vh] overflow-y-auto bg-[#09090B] text-slate-100">
           <DialogHeader className="px-8 py-6 bg-slate-900/50 border-b border-slate-800">
             <DialogTitle className="text-lg font-bold tracking-tight text-slate-50">
               {editingAccount ? 'Editar Conta' : 'Nova Conta Bancária'}
@@ -916,7 +916,7 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
 
       {/* CREDIT CARD NEW/EDIT DIALOG */}
       <Dialog open={isCardModalOpen} onOpenChange={setIsCardModalOpen}>
-        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 overflow-hidden bg-[#09090B] text-slate-100">
+        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 max-h-[85vh] overflow-y-auto bg-[#09090B] text-slate-100">
           <DialogHeader className="px-8 py-6 bg-slate-900/50 border-b border-slate-800">
             <DialogTitle className="text-lg font-bold tracking-tight text-slate-50">
               {editingCard ? 'Editar Cartão' : 'Novo Cartão de Crédito'}
@@ -1163,7 +1163,7 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
 
       {/* PAY INVOICE DIALOG WITH BALANCE REDUCTION */}
       <Dialog open={isPayInvoiceModalOpen} onOpenChange={setIsPayInvoiceModalOpen}>
-        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 overflow-hidden bg-[#09090B] text-slate-100">
+        <DialogContent className="sm:max-w-[450px] border-slate-800 rounded-3xl p-0 max-h-[85vh] overflow-y-auto bg-[#09090B] text-slate-100">
           <DialogHeader className="px-8 py-6 bg-slate-900/50 border-b border-slate-800">
             <DialogTitle className="text-lg font-bold tracking-tight text-slate-50">
               Quitar / Registrar Pagamento de Fatura

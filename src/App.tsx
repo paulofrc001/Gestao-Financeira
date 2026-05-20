@@ -52,7 +52,8 @@ import LoadingState from './components/LoadingState';
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNewTxOpen, setIsNewTxOpen] = useState(false);
 
   if (!isAuthenticated) {
@@ -64,53 +65,161 @@ export default function App() {
       <Toaster position="top-right" theme="dark" />
       <NewTransactionDialog open={isNewTxOpen} onOpenChange={setIsNewTxOpen} />
       
-      {/* Sidebar */}
-      <aside 
-        className={`fixed top-0 left-0 z-40 h-screen transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 w-64 bg-[#09090B] border-r border-slate-800 pt-5`}
-      >
-        <div className="px-6 pb-8 flex items-center gap-2">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            <TrendingUp className="text-white w-5 h-5" />
+      {/* Mobile Top Header (hidden on desktop) */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-[#09090B]/85 backdrop-blur-md border-b border-slate-800 px-4 flex items-center justify-between z-30">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="text-slate-400 hover:text-white hover:bg-slate-800/50"
+          >
+            <Menu className="w-5 h-5" />
+          </Button>
+          <div className="flex items-center gap-1.5 ml-1">
+            <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <TrendingUp className="text-white w-4.5 h-4.5" />
+            </div>
+            <span className="text-base font-extrabold tracking-tight">Finna<span className="text-indigo-500">AI</span></span>
           </div>
-          <span className="text-xl font-bold tracking-tight">Finna<span className="text-indigo-500">AI</span></span>
         </div>
-        
-        <nav className="px-3 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                activeTab === item.id 
-                  ? 'bg-slate-800/50 text-indigo-400 shadow-lg shadow-black/5' 
-                  : 'text-slate-400 hover:bg-slate-800/30 hover:text-slate-100'
-              }`}
-            >
-              <item.icon className="w-4.5 h-4.5" />
-              {item.label}
-              {item.id === 'insights' && (
-                <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/30 uppercase font-bold">New</span>
-              )}
-            </button>
-          ))}
-        </nav>
+        <div>
+          <Button 
+            onClick={() => setIsNewTxOpen(true)}
+            className="rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 h-9"
+          >
+            <Plus className="w-4 h-4 mr-0.5" />
+            Novo
+          </Button>
+        </div>
+      </div>
 
-        <div className="absolute bottom-5 left-0 w-full px-6">
-          <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800">
-            <p className="text-[10px] text-slate-500 mb-3 uppercase tracking-widest font-bold text-center">Fundo de Emergência</p>
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mb-2">
-               <div className="bg-indigo-500 h-full rounded-full" style={{ width: '68%' }}></div>
-            </div>
-            <div className="flex justify-between items-center text-[10px] text-slate-400">
-               <span>R$ 6.800</span>
-               <span>R$ 10.000</span>
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden animate-in fade-in duration-200"
+        />
+      )}
+
+      {/* Sidebar - Collapsible on desktop, drawer on mobile */}
+      <aside 
+        className={`fixed top-0 left-0 z-40 h-screen bg-[#09090B] border-r border-slate-800 pt-5 transition-all duration-300 ease-in-out flex flex-col justify-between
+          ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} 
+          md:translate-x-0 
+          ${isSidebarCollapsed ? 'md:w-20' : 'md:w-64'} 
+          w-64`}
+      >
+        <div>
+          {/* Sidebar Header / Logo */}
+          <div className={`px-6 pb-8 flex items-center justify-between gap-2 ${isSidebarCollapsed ? 'md:px-2 md:justify-center' : ''}`}>
+            {(!isSidebarCollapsed || isMobileMenuOpen) ? (
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="text-white w-5 h-5" />
+                </div>
+                <span className="text-xl font-bold tracking-tight">Finna<span className="text-indigo-500">AI</span></span>
+              </div>
+            ) : (
+              <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/10">
+                <TrendingUp className="text-white w-5 h-5" />
+              </div>
+            )}
+            
+            <div className="flex items-center gap-1">
+              {/* Desktop Collapse Button */}
+              <Button
+                variant="ghost" 
+                size="icon"
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className="hidden md:flex h-8 w-8 text-slate-400 hover:text-white rounded-lg border border-slate-800 hover:bg-slate-800/80"
+                title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+              >
+                {isSidebarCollapsed ? (
+                  <ChevronRight className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 rotate-180 transition-transform duration-300" />
+                )}
+              </Button>
+
+              {/* Mobile Close Button */}
+              <Button
+                variant="ghost" 
+                size="icon"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex md:hidden h-8 w-8 text-slate-400 hover:text-white rounded-lg border border-slate-800 hover:bg-slate-800/80"
+              >
+                <X className="w-4 h-4" />
+              </Button>
             </div>
           </div>
+          
+          {/* Nav Items */}
+          <nav className={`space-y-1 ${isSidebarCollapsed ? 'md:px-2' : 'px-3'}`}>
+            {NAV_ITEMS.map((item) => {
+              const isSelected = activeTab === item.id;
+              const isCollapsedOnDesktop = isSidebarCollapsed;
+              
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  title={isCollapsedOnDesktop ? item.label : undefined}
+                  className={`w-full flex items-center rounded-xl text-sm font-medium transition-all
+                    ${isCollapsedOnDesktop ? 'md:justify-center md:py-3 md:px-0' : 'gap-3 px-3 py-2.5'} 
+                    ${isSelected 
+                      ? 'bg-slate-800/50 text-indigo-400 shadow-lg shadow-black/5' 
+                      : 'text-slate-400 hover:bg-slate-800/30 hover:text-slate-100'}`}
+                >
+                  <item.icon className="w-4.5 h-4.5 shrink-0" />
+                  {(!isCollapsedOnDesktop) && (
+                    <>
+                      <span className="truncate">{item.label}</span>
+                      {item.id === 'insights' && (
+                        <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/30 uppercase font-bold">New</span>
+                      )}
+                    </>
+                  )}
+                  {/* Keep label on mobile drawer regardless of desktop collapsed state */}
+                  {isCollapsedOnDesktop && (
+                    <span className="md:hidden truncate ml-3">{item.label}</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Bottom Sidebar Box */}
+        <div className={`p-4 ${isSidebarCollapsed ? 'md:p-2' : 'px-6 pb-6'}`}>
+          {(!isSidebarCollapsed) ? (
+            <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800 w-full">
+              <p className="text-[10px] text-slate-500 mb-3 uppercase tracking-widest font-bold text-center">Fundo de Emergência</p>
+              <div className="w-full bg-slate-800 h-1.5 rounded-full mb-2">
+                 <div className="bg-indigo-500 h-full rounded-full" style={{ width: '68%' }}></div>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-slate-400">
+                 <span>R$ 6.800</span>
+                 <span>R$ 10.000</span>
+              </div>
+            </div>
+          ) : (
+            <div 
+              className="bg-indigo-500/10 text-indigo-400 p-3 rounded-xl border border-indigo-500/20 text-center flex flex-col items-center mx-auto" 
+              title="Fundo de Emergência: R$ 6.800 / R$ 10.000 (68%)"
+            >
+              <Target className="w-4.5 h-4.5 mb-1" />
+              <span className="text-[10px] font-black">68%</span>
+            </div>
+          )}
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className={`transition-all ${isSidebarOpen ? 'md:ml-64' : 'ml-0'} p-4 md:p-8 pt-20 md:pt-8`}>
+      {/* Main Content (with margin-left matching the sidebar mode and top padding on mobile) */}
+      <main className={`transition-all duration-300 ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} p-4 md:p-8 pt-20 md:pt-8`}>
         {/* Header */}
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
