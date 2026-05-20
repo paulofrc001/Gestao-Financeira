@@ -506,3 +506,68 @@ export async function payCreditCardInvoice(
     throw err;
   }
 }
+
+export function expandInstallmentTransactions(transactions: any[], isSupabaseConfig: boolean = false): any[] {
+  const result: any[] = [];
+  
+  for (const tx of transactions) {
+    result.push(tx); // Insere a parcela atual encontrada no extrato (ex: 1/3)
+    
+    let installmentsStr = tx.installments;
+    if (!installmentsStr && tx.description) {
+      // Regex para captação de formato (1/5) ou "1/5" ou "1 de 5" na descrição
+      const match = tx.description.match(/[(]?(\d+)\s*\/\s*(\d+)[)]?/) || tx.description.match(/[(]?(\d+)\s+de\s+(\d+)[)]?/i);
+      if (match) {
+        installmentsStr = `${match[1]}/${match[2]}`;
+      }
+    }
+    
+    if (installmentsStr && typeof installmentsStr === 'string' && installmentsStr.includes('/')) {
+      const parts = installmentsStr.split('/');
+      const currentIdx = parseInt(parts[0], 10);
+      const totalIdx = parseInt(parts[1], 10);
+      
+      if (!isNaN(currentIdx) && !isNaN(totalIdx) && currentIdx > 0 && totalIdx > currentIdx) {
+        const baseDesc = tx.description.replace(/\s*\(\s*\d+\s*\/\s*\d+\s*\)\s*$/, '')
+                                       .replace(/\s*\d+\s*\/\s*\d+\s*$/, '')
+                                       .replace(/\s*\(\s*\d+\s+de\s+\d+\s*\)\s*$/, '')
+                                       .replace(/\s*\d+\s+de\s+\d+\s*$/, '')
+                                       .trim();
+        
+        // Gera e valida as faturas subsequentes criando as parcelas restantes dele
+        for (let i = currentIdx + 1; i <= totalIdx; i++) {
+          const monthsToAdd = i - currentIdx;
+          let nextDateStr = tx.date;
+          
+          try {
+            const dateObj = new Date(tx.date + 'T12:00:00');
+            if (!isNaN(dateObj.getTime())) {
+              const nextDate = addMonths(dateObj, monthsToAdd);
+              nextDateStr = format(nextDate, 'yyyy-MM-dd');
+            }
+          } catch (e) {
+            console.error('Erro na data de parcela subsequente:', e);
+          }
+          
+          const nextTx = {
+            ...tx,
+            description: `${baseDesc} (${i}/${totalIdx})`,
+            date: nextDateStr,
+            installments: `${i}/${totalIdx}`
+          };
+          
+          if (!isSupabaseConfig) {
+            nextTx.id = 'tx-' + Math.random().toString(36).substring(2, 9);
+          } else {
+            delete nextTx.id;
+          }
+          
+          result.push(nextTx);
+        }
+      }
+    }
+  }
+  
+  return result;
+}
+

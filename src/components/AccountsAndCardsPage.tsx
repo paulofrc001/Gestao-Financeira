@@ -52,7 +52,8 @@ import {
   getUpcomingInvoicesList, 
   formatBillingMonthLabel,
   getInvoiceBillingMonth,
-  isUUID
+  isUUID,
+  expandInstallmentTransactions
 } from '../lib/accountsCardsStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
@@ -376,14 +377,16 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                 return dbTx;
               });
 
-            // Persist the transaction items
+            // Persist the transaction items with predictive installment calculations
+            const finalTxsToSave = expandInstallmentTransactions(transactionsToBeSaved, isSupabaseConfigured);
+
             if (isSupabaseConfigured) {
-              const { error: batchInsertError } = await supabase.from('transactions').insert(transactionsToBeSaved);
+              const { error: batchInsertError } = await supabase.from('transactions').insert(finalTxsToSave);
               if (batchInsertError) throw batchInsertError;
             } else {
               const localStorageTransactions = localStorage.getItem('finna_transactions');
               const txsList = localStorageTransactions ? JSON.parse(localStorageTransactions) : [];
-              localStorage.setItem('finna_transactions', JSON.stringify([...transactionsToBeSaved, ...txsList]));
+              localStorage.setItem('finna_transactions', JSON.stringify([...finalTxsToSave, ...txsList]));
             }
 
             toast.success(`Sucesso absoluto! Cartão criado e ${parsedData.transactions.length} despesas importadas e categorizadas por IA!`, { id: cardParseToastId });

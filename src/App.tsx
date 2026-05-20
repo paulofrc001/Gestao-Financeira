@@ -835,6 +835,7 @@ function TransactionsPage() {
    // New Filter states
    const [sourceFilter, setSourceFilter] = useState<string>('all');
    const [categoryFilter, setCategoryFilter] = useState<string>('all');
+   const [segmentFilter, setSegmentFilter] = useState<'all' | 'accounts_manual' | 'credit_card'>('all');
    const [categoriesList, setCategoriesList] = useState<Category[]>([]);
    
    // Category creation states
@@ -1125,10 +1126,17 @@ function TransactionsPage() {
         const matchesSource = sourceFilter === 'all' || tx.source === sourceFilter;
         const matchesCategory = categoryFilter === 'all' || tx.category.toLowerCase() === categoryFilter.toLowerCase();
         
-        return matchesFilter && matchesSearch && matchesSource && matchesCategory;
+        let matchesSegment = true;
+        if (segmentFilter === 'accounts_manual') {
+          matchesSegment = !tx.card_id;
+        } else if (segmentFilter === 'credit_card') {
+          matchesSegment = !!tx.card_id;
+        }
+        
+        return matchesFilter && matchesSearch && matchesSource && matchesCategory && matchesSegment;
      });
      return filterTxsByDate(matched, dateFilter);
-   }, [transactions, filter, search, dateFilter, sourceFilter, categoryFilter]);
+   }, [transactions, filter, search, dateFilter, sourceFilter, categoryFilter, segmentFilter]);
 
    return (
       <div className="space-y-6">
@@ -1283,6 +1291,21 @@ function TransactionsPage() {
                            {categoriesList.map(cat => (
                               <SelectItem key={cat.id} value={cat.name} className="focus:bg-indigo-600 focus:text-white text-xs capitalize">{cat.name}</SelectItem>
                            ))}
+                        </SelectContent>
+                     </Select>
+                  </div>
+
+                  {/* Controle / Tipo de Canal (Separar Cartão e Conta/Manual) */}
+                  <div className="flex items-center gap-2">
+                     <span className="text-[9px] uppercase tracking-widest font-black text-slate-500 italic">Visualizar Canal:</span>
+                     <Select value={segmentFilter} onValueChange={(val: any) => setSegmentFilter(val)}>
+                        <SelectTrigger className="rounded-xl border border-slate-800/80 bg-slate-950 text-indigo-400 text-xs h-9 w-48 hover:bg-slate-900 focus:border-indigo-500 font-bold transition-all">
+                           <SelectValue placeholder="Todos os lançamentos" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#09090B] border-slate-800 text-slate-200">
+                           <SelectItem value="all" className="focus:bg-indigo-600 focus:text-white text-xs">Todos os Canais</SelectItem>
+                           <SelectItem value="accounts_manual" className="focus:bg-indigo-600 focus:text-white text-xs text-emerald-400 font-medium">Contas e Manual (Sem Cartão)</SelectItem>
+                           <SelectItem value="credit_card" className="focus:bg-indigo-600 focus:text-white text-xs text-indigo-400 font-medium">Cartão de Crédito</SelectItem>
                         </SelectContent>
                      </Select>
                   </div>

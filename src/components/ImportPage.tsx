@@ -14,7 +14,7 @@ import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
-import { getAccounts, Account } from '../lib/accountsCardsStore';
+import { getAccounts, Account, expandInstallmentTransactions } from '../lib/accountsCardsStore';
 import { 
   Select, 
   SelectContent, 
@@ -138,7 +138,7 @@ export default function ImportPage() {
           return;
         }
 
-        const txsToSave = transactions.map(tx => {
+        const rawTxs = transactions.map(tx => {
           const finalAmount = tx.amount;
           return {
             user_id: user.id,
@@ -157,6 +157,8 @@ export default function ImportPage() {
           };
         });
 
+        const txsToSave = expandInstallmentTransactions(rawTxs, true);
+
         const { error } = await supabase.from('transactions').insert(txsToSave);
         if (error) throw error;
 
@@ -170,16 +172,15 @@ export default function ImportPage() {
           if (balanceErr) console.error('Error updating account balance in DB:', balanceErr);
         }
 
-        toast.success(`${transactions.length} transações salvas com sucesso no banco de dados!`);
+        toast.success(`${txsToSave.length} transações salvas com sucesso no banco de dados!`);
       } else {
         // 2. OFFLINE / LOCALSTORAGE MODE
         const localSaved = localStorage.getItem('finna_transactions');
         const existingList = localSaved ? JSON.parse(localSaved) : [];
 
-        const generatedTxs = transactions.map(tx => {
+        const rawLocalTxs = transactions.map(tx => {
           const finalAmount = tx.amount;
           return {
-            id: 'tx-' + Math.random().toString(36).substring(2, 9),
             description: tx.description,
             amount: finalAmount,
             category: tx.category || 'Outros',
@@ -194,6 +195,8 @@ export default function ImportPage() {
             account_id: accId
           };
         });
+
+        const generatedTxs = expandInstallmentTransactions(rawLocalTxs, false);
 
         localStorage.setItem('finna_transactions', JSON.stringify([...generatedTxs, ...existingList]));
 
