@@ -344,9 +344,11 @@ function Dashboard() {
     const cardIncome = cardTransactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + Number(t.amount), 0);
     const cardExpense = cardTransactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + Math.abs(Number(t.amount)), 0);
 
+    const netCardExpense = Math.max(0, cardExpense - cardIncome);
+
     const income = segmentFilter === 'credit_card' ? cardIncome : bankIncome;
     const expense = segmentFilter === 'credit_card' ? cardExpense : bankExpense;
-    const balance = segmentFilter === 'credit_card' ? -cardExpense : bankBalance;
+    const balance = segmentFilter === 'credit_card' ? -netCardExpense : bankBalance;
 
     return {
       balance,
@@ -357,6 +359,7 @@ function Dashboard() {
       bankExpense,
       cardExpense,
       cardIncome,
+      netCardExpense,
       recent: filteredTransactions.slice(0, 4)
     };
   }, [filteredTransactions, segmentFilter]);
@@ -718,9 +721,9 @@ function Dashboard() {
         {segmentFilter === 'all' && (
           <>
             <StatCard title="Saldo em Contas" value={loading ? "..." : `R$ ${stats.bankBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={Wallet} trend="up" />
-            <StatCard title="Fatura Estimada" value={loading ? "..." : `R$ ${stats.cardExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={CreditCard} trend="down" color="red" subtitle="Gastos do mês no cartão" />
+            <StatCard title="Fatura Estimada" value={loading ? "..." : `R$ ${stats.netCardExpense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={CreditCard} trend="down" color="red" subtitle="Fatura líquida do mês (com pagamentos)" />
             <StatCard title="Receitas Totais" value={loading ? "..." : `R$ ${stats.bankIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={TrendingUp} trend="up" color="green" />
-            <StatCard title="Resultado Consolidado" value={loading ? "..." : `R$ ${(stats.bankIncome - stats.bankExpense - stats.cardExpense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={DollarSign} trend={(stats.bankIncome - stats.bankExpense - stats.cardExpense) >= 0 ? "up" : "down"} color={(stats.bankIncome - stats.bankExpense - stats.cardExpense) >= 0 ? "green" : "red"} subtitle="Saldo com faturas deduzidas" />
+            <StatCard title="Resultado Consolidado" value={loading ? "..." : `R$ ${(stats.bankIncome - stats.bankExpense - stats.netCardExpense).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} change="" icon={DollarSign} trend={(stats.bankIncome - stats.bankExpense - stats.netCardExpense) >= 0 ? "up" : "down"} color={(stats.bankIncome - stats.bankExpense - stats.netCardExpense) >= 0 ? "green" : "red"} subtitle="Saldo com faturas deduzidas" />
           </>
         )}
 

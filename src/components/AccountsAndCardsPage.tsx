@@ -352,7 +352,15 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                 const desc = String(tx.description || 'Compra no Crédito').trim() || 'Compra no Crédito';
                 const parsedAmt = typeof tx.amount === 'number' ? tx.amount : parseFloat(tx.amount);
                 const amt = isNaN(parsedAmt) ? 0 : parsedAmt;
-                const finalAmount = amt < 0 ? amt : -Math.abs(amt);
+
+                const descLower = desc.toLowerCase();
+                const isPaymentOrCredit = 
+                  tx.type === 'income' || 
+                  tx.amount > 0 ||
+                  /pagamento|pagto|pgto|estorno|reembolso|devolução|devolucao|refund|crédito|credito|cancela|ajuste/i.test(descLower);
+
+                const finalAmount = isPaymentOrCredit ? Math.abs(amt) : -Math.abs(amt);
+                const finalType = isPaymentOrCredit ? 'income' as const : 'expense' as const;
 
                 const dbTx: any = {
                   user_id: user_UUID || null,
@@ -360,11 +368,11 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                   amount: finalAmount,
                   category: String(tx.category || 'Outros').trim() || 'Outros',
                   date: parsedTransactionDate,
-                  type: 'expense' as const,
-                  is_subscription: !!(tx.isSubscription || tx.is_subscription),
-                  is_recurring: !!(tx.isRecurring || tx.is_recurring),
-                  installments: tx.installments ? String(tx.installments) : null,
-                  emotion: String(tx.suggestedEmotion || tx.emotion || 'Neutro').trim() || 'Neutro',
+                  type: finalType,
+                  is_subscription: !isPaymentOrCredit && !!(tx.isSubscription || tx.is_subscription),
+                  is_recurring: !isPaymentOrCredit && !!(tx.isRecurring || tx.is_recurring),
+                  installments: isPaymentOrCredit ? null : (tx.installments ? String(tx.installments) : null),
+                  emotion: isPaymentOrCredit ? 'Aliviado' : (String(tx.suggestedEmotion || tx.emotion || 'Neutro').trim() || 'Neutro'),
                   status: 'completed',
                   source: assignedCardName || 'Fatura de Cartão',
                   account_id: isUUID(savedCardCC.account_id) ? savedCardCC.account_id : null,

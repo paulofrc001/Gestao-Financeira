@@ -378,7 +378,7 @@ export function calculateCardMetrics(
   isWarning: boolean;      // >80% utilization
   isCritical: boolean;     // >100% utilization
 } {
-  const cardTxs = transactions.filter(t => t.card_id === card.id && t.type === 'expense');
+  const cardTxs = transactions.filter(t => t.card_id === card.id);
   const now = new Date();
   const currentMonthValue = getInvoiceBillingMonth(format(now, 'yyyy-MM-dd'), card.closing_day);
   const nextMonthValue = getInvoiceBillingMonth(format(addMonths(now, 1), 'yyyy-MM-dd'), card.closing_day);
@@ -389,27 +389,35 @@ export function calculateCardMetrics(
   const byMonth: Record<string, number> = {};
 
   cardTxs.forEach(tx => {
-    const amount = Math.abs(Number(tx.amount || 0));
+    const isIncome = tx.type === 'income';
+    const amountVal = Math.abs(Number(tx.amount || 0));
+    // Income (payments/credits) reduces the bill, expense adds to it
+    const finalAmount = isIncome ? -amountVal : amountVal;
+
     const billingMonth = getInvoiceBillingMonth(tx.date, card.closing_day);
 
-    byMonth[billingMonth] = (byMonth[billingMonth] || 0) + amount;
-    totalOutstanding += amount;
+    byMonth[billingMonth] = (byMonth[billingMonth] || 0) + finalAmount;
+    totalOutstanding += finalAmount;
 
     if (billingMonth === currentMonthValue) {
-      currentBill += amount;
+      currentBill += finalAmount;
     } else if (billingMonth === nextMonthValue) {
-      nextBill += amount;
+      nextBill += finalAmount;
     }
   });
 
-  const limitUtilization = card.limit_amount > 0 ? (currentBill / card.limit_amount) * 100 : 0;
+  const finalCurrentBill = Math.max(0, currentBill);
+  const finalNextBill = Math.max(0, nextBill);
+  const finalTotalOutstanding = Math.max(0, totalOutstanding);
+
+  const limitUtilization = card.limit_amount > 0 ? (finalCurrentBill / card.limit_amount) * 100 : 0;
   const isWarning = limitUtilization >= 80 && limitUtilization < 100;
   const isCritical = limitUtilization >= 100;
 
   return {
-    currentBill,
-    nextBill,
-    totalOutstanding,
+    currentBill: finalCurrentBill,
+    nextBill: finalNextBill,
+    totalOutstanding: finalTotalOutstanding,
     byMonth,
     limitUtilization,
     isWarning,
@@ -444,8 +452,7 @@ export async function payCreditCardInvoice(
         localStorage.setItem('finna_accounts', JSON.stringify(accounts));
       }
 
-      // 2. We can record a payment transaction that has card_id but is positive (income/credit) of card_id, 
-      // or simply of checking account type
+      // 2. Record checks and card transactions of payment
       const localSaved = localStorage.getItem('finna_transactions');
       const txs = localSaved ? JSON.parse(localSaved) : [];
       
@@ -455,16 +462,28 @@ export async function payCreditCardInvoice(
         amount: -amount,
         date: format(new Date(), 'yyyy-MM-dd'),
         type: 'expense' as const,
-        category: 'moradia', // fellback category for invoice
+        category: 'Outros',
         emotion: 'Aliviado',
         source: sourceAccount ? sourceAccount.name : 'Outro',
         status: 'completed',
-        account_id: sourceAccountId
+        account_id: sourceAccountId !== 'manual' ? sourceAccountId : null
       };
 
-      // Since the bill is paid, we can optionally tag existing card transactions as "settled" or similar,
-      // but standard is to record the debit transaction from checking account.
-      localStorage.setItem('finna_transactions', JSON.stringify([newTxCheck, ...txs]));
+      const newTxCard = {
+        id: 'tx-' + Math.random().toString(36).substring(2, 9),
+        description: `Crédito de Pagamento - ${card.name}`,
+        amount: amount, // Positive amount
+        date: format(new Date(), 'yyyy-MM-dd'),
+        type: 'income' as const,
+        category: 'Outros',
+        emotion: 'Aliviado',
+        source: card.name,
+        status: 'completed',
+        card_id: card.id,
+        account_id: sourceAccountId !== 'manual' ? sourceAccountId : null
+      };
+
+      localStorage.setItem('finna_transactions', JSON.stringify([newTxCheck, newTxCard, ...txs]));
     } catch (err: any) {
       console.error(err);
       throw err;
@@ -477,18 +496,32 @@ export async function payCreditCardInvoice(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Usuário não autenticado');
 
-    // Add settlement transaction
-    const { error: txError } = await supabase.from('transactions').insert({
-      user_id: user.id,
-      description: description,
-      amount: -amount,
-      date: format(new Date(), 'yyyy-MM-dd'),
-      type: 'expense',
-      category: 'Outros',
-      source: sourceAccount ? sourceAccount.name : 'Manual',
-      status: 'completed',
-      account_id: isUUID(sourceAccountId) ? sourceAccountId : null
-    });
+    // Add settlement transactions: both debit from bank account and credit to credit card
+    const { error: txError } = await supabase.from('transactions').insert([
+      {
+        user_id: user.id,
+        description: description,
+        amount: -amount,
+        date: format(new Date(), 'yyyy-MM-dd'),
+        type: 'expense',
+        category: 'Outros',
+        source: sourceAccount ? sourceAccount.name : 'Manual',
+        status: 'completed',
+        account_id: isUUID(sourceAccountId) ? sourceAccountId : null
+      },
+      {
+        user_id: user.id,
+        description: `Crédito de Pagamento - ${card.name}`,
+        amount: amount, // Positive
+        date: format(new Date(), 'yyyy-MM-dd'),
+        type: 'income',
+        category: 'Outros',
+        source: card.name,
+        status: 'completed',
+        card_id: card.id,
+        account_id: isUUID(sourceAccountId) ? sourceAccountId : null
+      }
+    ]);
 
     if (txError) throw txError;
 
