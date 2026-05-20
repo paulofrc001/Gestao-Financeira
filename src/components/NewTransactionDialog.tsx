@@ -190,6 +190,7 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
             is_impulse: values.isImpulse,
             necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
             source: sourceName,
+            account_id: card ? card.account_id : null,
             card_id: selectedCardId,
             installments: `${i}/${installments}`,
             status: 'completed'
@@ -212,7 +213,7 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
           is_impulse: values.isImpulse,
           necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
           source: sourceName,
-          account_id: paymentMethod === 'account' ? selectedAccountId : null,
+          account_id: paymentMethod === 'account' ? selectedAccountId : (card ? card.account_id : null),
           card_id: paymentMethod === 'card' ? selectedCardId : null,
           status: 'completed'
         });

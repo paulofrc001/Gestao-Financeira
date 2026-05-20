@@ -355,6 +355,7 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
                 emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
                 status: 'completed',
                 source: assignedCardName,
+                account_id: savedCardCC.account_id,
                 card_id: assignedCardId
               };
             });
