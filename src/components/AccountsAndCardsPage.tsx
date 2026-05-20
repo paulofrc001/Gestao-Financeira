@@ -51,7 +51,8 @@ import {
   payCreditCardInvoice, 
   getUpcomingInvoicesList, 
   formatBillingMonthLabel,
-  getInvoiceBillingMonth
+  getInvoiceBillingMonth,
+  isUUID
 } from '../lib/accountsCardsStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
@@ -334,31 +335,46 @@ export default function AccountsAndCardsPage({ onRefreshTrigger }: AccountsAndCa
             }
 
             const currentYear = new Date().getFullYear();
-            const transactionsToBeSaved = parsedData.transactions.map((tx: any) => {
-              let parsedTransactionDate = tx.date || format(new Date(), 'yyyy-MM-dd');
-              if (parsedTransactionDate.length === 5) {
-                // Attach current year if only MM-DD is supplied
-                parsedTransactionDate = `${currentYear}-${parsedTransactionDate}`;
-              }
+            const transactionsToBeSaved = (parsedData.transactions || [])
+              .filter((tx: any) => tx && (tx.description || tx.amount))
+              .map((tx: any) => {
+                let parsedTransactionDate = tx.date || format(new Date(), 'yyyy-MM-dd');
+                if (typeof parsedTransactionDate === 'string' && parsedTransactionDate.length === 5) {
+                  // Attach current year if only MM-DD is supplied
+                  parsedTransactionDate = `${currentYear}-${parsedTransactionDate}`;
+                }
+                if (!parsedTransactionDate || typeof parsedTransactionDate !== 'string' || parsedTransactionDate.trim() === '') {
+                  parsedTransactionDate = format(new Date(), 'yyyy-MM-dd');
+                }
 
-              return {
-                id: isSupabaseConfigured ? undefined : 'tx-' + Math.random().toString(36).substring(2, 9),
-                user_id: user_UUID || undefined,
-                description: tx.description,
-                amount: tx.amount < 0 ? tx.amount : -Math.abs(tx.amount || 0), // Credit cards are negative expenses
-                category: tx.category || 'Outros',
-                date: parsedTransactionDate,
-                type: 'expense' as const,
-                is_subscription: tx.isSubscription || tx.is_subscription || false,
-                is_recurring: tx.isRecurring || tx.is_recurring || false,
-                installments: tx.installments || null,
-                emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
-                status: 'completed',
-                source: assignedCardName,
-                account_id: savedCardCC.account_id,
-                card_id: assignedCardId
-              };
-            });
+                const desc = String(tx.description || 'Compra no Crédito').trim() || 'Compra no Crédito';
+                const parsedAmt = typeof tx.amount === 'number' ? tx.amount : parseFloat(tx.amount);
+                const amt = isNaN(parsedAmt) ? 0 : parsedAmt;
+                const finalAmount = amt < 0 ? amt : -Math.abs(amt);
+
+                const dbTx: any = {
+                  user_id: user_UUID || null,
+                  description: desc,
+                  amount: finalAmount,
+                  category: String(tx.category || 'Outros').trim() || 'Outros',
+                  date: parsedTransactionDate,
+                  type: 'expense' as const,
+                  is_subscription: !!(tx.isSubscription || tx.is_subscription),
+                  is_recurring: !!(tx.isRecurring || tx.is_recurring),
+                  installments: tx.installments ? String(tx.installments) : null,
+                  emotion: String(tx.suggestedEmotion || tx.emotion || 'Neutro').trim() || 'Neutro',
+                  status: 'completed',
+                  source: assignedCardName || 'Fatura de Cartão',
+                  account_id: isUUID(savedCardCC.account_id) ? savedCardCC.account_id : null,
+                  card_id: isUUID(assignedCardId) ? assignedCardId : null
+                };
+
+                if (!isSupabaseConfigured) {
+                  dbTx.id = 'tx-' + Math.random().toString(36).substring(2, 9);
+                }
+
+                return dbTx;
+              });
 
             // Persist the transaction items
             if (isSupabaseConfigured) {
