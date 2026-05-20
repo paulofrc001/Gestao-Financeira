@@ -40,6 +40,9 @@ export const INITIAL_DEMO_TRANSACTIONS = [
 ];
 
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
+import { fetchCategories, saveCategory, Category } from './lib/categoriesStore';
 import { MainFlowChart, CategoriesPieChart, EmotionalRadarChart } from './components/Charts';
 import NewTransactionDialog from './components/NewTransactionDialog';
 import EditTransactionDialog from './components/EditTransactionDialog';
@@ -829,8 +832,29 @@ function TransactionsPage() {
    const [isEditOpen, setIsEditOpen] = useState(false);
    const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ type: 'all' });
 
+   // New Filter states
+   const [sourceFilter, setSourceFilter] = useState<string>('all');
+   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+   const [categoriesList, setCategoriesList] = useState<Category[]>([]);
+   
+   // Category creation states
+   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
+   const [newCategoryName, setNewCategoryName] = useState('');
+   const [newCategoryType, setNewCategoryType] = useState<'expense' | 'income'>('expense');
+   const [newCategoryColor, setNewCategoryColor] = useState('#820ad1');
+
+   const loadCategories = async () => {
+     try {
+       const cats = await fetchCategories();
+       setCategoriesList(cats);
+     } catch (err) {
+       console.error('Error loading categories:', err);
+     }
+   };
+
    useEffect(() => {
      fetchTransactions();
+     loadCategories();
    }, []);
 
    const fetchTransactions = async () => {
@@ -937,15 +961,44 @@ function TransactionsPage() {
      fetchTransactions();
    };
 
+   const uniqueSources = React.useMemo(() => {
+     const sourcesSet = new Set<string>();
+     transactions.forEach(tx => {
+       if (tx.source) {
+         sourcesSet.add(tx.source);
+       }
+     });
+     return Array.from(sourcesSet).sort();
+   }, [transactions]);
+
+   const handleCreateCategory = async () => {
+     if (!newCategoryName.trim()) {
+       toast.error('Informe o nome da categoria');
+       return;
+     }
+     try {
+       await saveCategory(newCategoryName, newCategoryType, newCategoryColor);
+       toast.success(`Categoria "${newCategoryName}" criada com sucesso!`);
+       setIsNewCategoryOpen(false);
+       setNewCategoryName('');
+       loadCategories();
+     } catch (err: any) {
+       toast.error(err.message || 'Erro ao criar categoria');
+     }
+   };
+
    const filteredTransactions = React.useMemo(() => {
      const matched = transactions.filter(tx => {
         const matchesFilter = filter === 'all' || tx.type === filter;
         const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) || 
                              tx.category.toLowerCase().includes(search.toLowerCase());
-        return matchesFilter && matchesSearch;
+        const matchesSource = sourceFilter === 'all' || tx.source === sourceFilter;
+        const matchesCategory = categoryFilter === 'all' || tx.category.toLowerCase() === categoryFilter.toLowerCase();
+        
+        return matchesFilter && matchesSearch && matchesSource && matchesCategory;
      });
      return filterTxsByDate(matched, dateFilter);
-   }, [transactions, filter, search, dateFilter]);
+   }, [transactions, filter, search, dateFilter, sourceFilter, categoryFilter]);
 
    return (
       <div className="space-y-6">
@@ -959,6 +1012,78 @@ function TransactionsPage() {
            transactions={transactions} 
            onChange={(f) => setDateFilter(f)} 
          />
+
+         {/* Nova Categoria Dialog */}
+         <Dialog open={isNewCategoryOpen} onOpenChange={setIsNewCategoryOpen}>
+           <DialogContent className="bg-[#09090B]/95 border border-slate-800 text-slate-100 max-w-sm rounded-3xl p-6 shadow-2xl backdrop-blur-md">
+             <DialogHeader>
+               <DialogTitle className="text-lg font-bold text-slate-50 italic">Criar Categoria</DialogTitle>
+               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black">Personalize seu fluxo de caixa</p>
+             </DialogHeader>
+             <div className="space-y-4 py-3">
+               <div className="space-y-2">
+                 <Label className="text-[10px] uppercase tracking-widest font-black text-slate-500 italic">Nome da Categoria</Label>
+                 <Input 
+                   value={newCategoryName} 
+                   onChange={(e) => setNewCategoryName(e.target.value)} 
+                   placeholder="Ex: Assinaturas, Cursos, Academia..." 
+                   className="rounded-xl border-slate-800 bg-slate-900/50 text-slate-100 h-11 focus:border-indigo-500"
+                 />
+               </div>
+               <div className="space-y-2">
+                 <Label className="text-[10px] uppercase tracking-widest font-black text-slate-500 italic">Tipo de Fluxo</Label>
+                 <div className="grid grid-cols-2 gap-2">
+                   <Button 
+                     type="button"
+                     variant="outline"
+                     onClick={() => setNewCategoryType('expense')}
+                     className={`h-11 rounded-xl text-[10px] uppercase font-black tracking-widest transition-all ${newCategoryType === 'expense' ? 'bg-indigo-600 border-indigo-500 text-white' : 'text-slate-500 hover:bg-slate-800/50 border-slate-800 bg-transparent'}`}
+                   >
+                     Despesa
+                   </Button>
+                   <Button 
+                     type="button"
+                     variant="outline"
+                     onClick={() => setNewCategoryType('income')}
+                     className={`h-11 rounded-xl text-[10px] uppercase font-black tracking-widest transition-all ${newCategoryType === 'income' ? 'bg-indigo-600 border-indigo-500 text-white' : 'text-slate-500 hover:bg-slate-800/50 border-slate-800 bg-transparent'}`}
+                   >
+                     Receita
+                   </Button>
+                 </div>
+               </div>
+               <div className="space-y-2">
+                 <Label className="text-[10px] uppercase tracking-widest font-black text-slate-500 italic">Cor Temática</Label>
+                 <div className="flex flex-wrap gap-2 py-1 justify-center">
+                   {['#820ad1', '#f59e0b', '#ef4444', '#10b981', '#3b82f6', '#ec4899', '#8b5cf6', '#64748b'].map((col) => (
+                     <button 
+                       key={col}
+                       type="button"
+                       onClick={() => setNewCategoryColor(col)}
+                       style={{ backgroundColor: col }}
+                       className={`w-7 h-7 rounded-full border border-slate-800 transition-all ${newCategoryColor === col ? 'ring-2 ring-indigo-500 scale-110 border-white' : 'opacity-80 scale-100 hover:opacity-100'}`}
+                     />
+                   ))}
+                 </div>
+               </div>
+             </div>
+             <DialogFooter className="flex sm:justify-end gap-2 pt-2 border-t border-slate-800/50">
+               <Button 
+                 variant="ghost" 
+                 onClick={() => setIsNewCategoryOpen(false)}
+                 className="rounded-xl text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white-800/50"
+               >
+                 Cancelar
+               </Button>
+               <Button 
+                 onClick={handleCreateCategory}
+                 className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold uppercase tracking-wider"
+               >
+                 Criar
+               </Button>
+             </DialogFooter>
+           </DialogContent>
+         </Dialog>
+
          <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl pt-6">
             <div className="px-8 pb-4 flex flex-col md:flex-row items-center justify-between border-b border-slate-800/50 gap-4">
                <div className="flex gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
@@ -996,6 +1121,54 @@ function TransactionsPage() {
                   </div>
                </div>
             </div>
+
+            {/* Extended dynamic sub-filters bar */}
+            <div className="px-8 py-3 bg-[#09090B]/30 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/30">
+               <div className="flex flex-wrap items-center gap-6">
+                  {/* Filter by Source (Origem) */}
+                  <div className="flex items-center gap-2">
+                     <span className="text-[9px] uppercase tracking-widest font-black text-slate-500 italic">Filtrar por Origem:</span>
+                     <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                        <SelectTrigger className="rounded-xl border border-slate-800/80 bg-slate-950 text-slate-300 text-xs h-9 w-44 hover:bg-slate-900 focus:border-indigo-500 transition-all">
+                           <SelectValue placeholder="Todas as origens" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#09090B] border-slate-800 text-slate-200">
+                           <SelectItem value="all" className="focus:bg-indigo-600 focus:text-white text-xs">Todas as Origens</SelectItem>
+                           {uniqueSources.map(src => (
+                              <SelectItem key={src} value={src} className="focus:bg-indigo-600 focus:text-white text-xs capitalize">{src}</SelectItem>
+                           ))}
+                        </SelectContent>
+                     </Select>
+                  </div>
+
+                  {/* Filter by Category (Categoria) */}
+                  <div className="flex items-center gap-2">
+                     <span className="text-[9px] uppercase tracking-widest font-black text-slate-500 italic">Filtrar por Categoria:</span>
+                     <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                        <SelectTrigger className="rounded-xl border border-slate-800/80 bg-slate-950 text-slate-300 text-xs h-9 w-44 hover:bg-slate-900 focus:border-indigo-500 transition-all">
+                           <SelectValue placeholder="Todas as categorias" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#09090B] border-slate-800 text-slate-200">
+                           <SelectItem value="all" className="focus:bg-indigo-600 focus:text-white text-xs">Todas as Categorias</SelectItem>
+                           {categoriesList.map(cat => (
+                              <SelectItem key={cat.id} value={cat.name} className="focus:bg-indigo-600 focus:text-white text-xs capitalize">{cat.name}</SelectItem>
+                           ))}
+                        </SelectContent>
+                     </Select>
+                  </div>
+               </div>
+
+               {/* Quick Button to add category */}
+               <Button 
+                  onClick={() => setIsNewCategoryOpen(true)}
+                  variant="outline"
+                  className="rounded-xl border border-slate-800 hover:text-white hover:bg-indigo-600 hover:border-indigo-500 font-bold text-[10px] uppercase tracking-wider h-9 px-3 transition-all"
+               >
+                  <Plus className="w-3.5 h-3.5 mr-1 text-indigo-400 group-hover:text-white" />
+                  Nova Categoria
+               </Button>
+            </div>
+
             <CardContent className="p-0">
                <div className="overflow-x-auto min-h-[400px]">
                   {loading ? (

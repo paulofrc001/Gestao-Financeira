@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Heart, Brain, AlertCircle, Save, Undo2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { toast } from 'sonner';
+import { fetchCategories, Category } from '../lib/categoriesStore';
 
 const formSchema = z.object({
   description: z.string().min(2, { message: "Descrição muito curta" }),
@@ -34,6 +35,21 @@ interface EditTransactionDialogProps {
 export default function EditTransactionDialog({ open, onOpenChange, transaction, onSuccess }: EditTransactionDialogProps) {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('core');
+  const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      const loadCats = async () => {
+        try {
+          const cats = await fetchCategories();
+          setAvailableCategories(cats);
+        } catch (err) {
+          console.error(err);
+        }
+      };
+      loadCats();
+    }
+  }, [open]);
 
   const form = useForm<any>({
     resolver: zodResolver(formSchema),
@@ -205,12 +221,11 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
                       <SelectValue placeholder="Selecione..." />
                     </SelectTrigger>
                     <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
-                      <SelectItem value="alimentacao" className="focus:bg-indigo-600 focus:text-white">Alimentação</SelectItem>
-                      <SelectItem value="moradia" className="focus:bg-indigo-600 focus:text-white">Moradia</SelectItem>
-                      <SelectItem value="lazer" className="focus:bg-indigo-600 focus:text-white">Lazer</SelectItem>
-                      <SelectItem value="transporte" className="focus:bg-indigo-600 focus:text-white">Transporte</SelectItem>
-                      <SelectItem value="Salário" className="focus:bg-indigo-600 focus:text-white">Salário</SelectItem>
-                      <SelectItem value="Outros" className="focus:bg-indigo-600 focus:text-white">Outros</SelectItem>
+                      {availableCategories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name} className="focus:bg-indigo-600 focus:text-white capitalize">
+                          {cat.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
