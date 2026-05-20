@@ -23,6 +23,7 @@ const formSchema = z.object({
   source: z.string().optional(),
   isImpulse: z.boolean().default(false),
   necessityLevel: z.string().optional(),
+  applyToAllSimilar: z.boolean().default(false),
 });
 
 interface EditTransactionDialogProps {
@@ -58,7 +59,8 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
       isImpulse: false,
       source: 'Manual',
       emotion: 'Neutro',
-      necessityLevel: '3'
+      necessityLevel: '3',
+      applyToAllSimilar: false
     }
   });
 
@@ -74,7 +76,8 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
         emotion: transaction.emotion || 'Neutro',
         source: transaction.source || 'Manual',
         isImpulse: !!transaction.is_impulse,
-        necessityLevel: transaction.necessity_level ? String(transaction.necessity_level) : '3'
+        necessityLevel: transaction.necessity_level ? String(transaction.necessity_level) : '3',
+        applyToAllSimilar: false
       });
     }
   }, [transaction, form]);
@@ -90,6 +93,7 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
         setLoading(true);
         const localSaved = localStorage.getItem('finna_transactions');
         let txs = localSaved ? JSON.parse(localSaved) : [];
+        let updatedSimilarCount = 0;
         
         // Update the item in local array
         txs = txs.map((t: any) => {
@@ -106,12 +110,23 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
               necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
               source: values.source || 'Manual',
             };
+          } else if (values.applyToAllSimilar && t.description?.trim().toLowerCase() === transaction.description?.trim().toLowerCase()) {
+            updatedSimilarCount++;
+            return {
+              ...t,
+              category: values.category
+            };
           }
           return t;
         });
 
         localStorage.setItem('finna_transactions', JSON.stringify(txs));
-        toast.success('Transação atualizada no modo demonstração!');
+        
+        if (values.applyToAllSimilar && updatedSimilarCount > 0) {
+          toast.success(`Transação e mais ${updatedSimilarCount} lançamentos semelhantes atualizados!`);
+        } else {
+          toast.success('Transação atualizada no modo demonstração!');
+        }
         onOpenChange(false);
         onSuccess();
       } catch (err: any) {
@@ -140,6 +155,22 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
         .eq('id', transaction.id);
 
       if (error) throw error;
+
+      let updatedSimilarCount = 0;
+      if (values.applyToAllSimilar && transaction.description) {
+        // Bulk update other transactions with the exact same description
+        const { error: batchErr, count } = await supabase
+          .from('transactions')
+          .update({ category: values.category })
+          .eq('description', transaction.description)
+          .not('id', 'eq', transaction.id);
+        
+        if (batchErr) {
+          console.error("Erro no depara em lote:", batchErr);
+        } else {
+          toast.success('Transações semelhantes atualizadas via depara!');
+        }
+      }
       
       toast.success('Transação atualizada com sucesso!');
       onOpenChange(false);
@@ -228,6 +259,20 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-900/40 rounded-2xl border border-slate-800/80 mt-1 duration-300 hover:border-slate-800 transition">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-indigo-400 block">Propagar Categoria (Depara)?</span>
+                    <p className="text-[10px] text-slate-400 max-w-[280px] leading-tight font-medium">Alterar a categoria de todas as outras transações com esta mesma descrição.</p>
+                  </div>
+                  <Button 
+                    type="button"
+                    onClick={() => form.setValue('applyToAllSimilar', !form.watch('applyToAllSimilar'))}
+                    className={`h-8 rounded-xl px-4 text-[9px] font-bold uppercase tracking-widest transition-all ${form.watch('applyToAllSimilar') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-800/60 text-slate-400'}`}
+                  >
+                    {form.watch('applyToAllSimilar') ? 'Sim' : 'Não'}
+                  </Button>
                 </div>
               </div>
 
