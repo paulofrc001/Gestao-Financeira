@@ -5,7 +5,7 @@ import {
   CreditCard, CalendarClock, TrendingUp, Plus, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card as UICard, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -14,7 +14,8 @@ import { ptBR } from 'date-fns/locale';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useGemini } from '../hooks/useGemini';
 import LoadingState from './LoadingState';
-import { getAccounts, Account, expandInstallmentTransactions, filterDuplicateTransactions, saveAccount, AccountType } from '../lib/accountsCardsStore';
+import { getAccounts, Account, getCards, Card as CreditCardType, saveAccount, AccountType } from '../lib/accountsCardsStore';
+import { FinancialImportService } from '../services/FinancialImportService';
 import { 
   Select, 
   SelectContent, 
@@ -37,11 +38,13 @@ export default function ImportPage() {
   const [step, setStep] = useState<'upload' | 'review'>('upload');
   const [transactions, setTransactions] = useState<any[]>([]);
   const [insights, setInsights] = useState<any>(null);
-  const [isCreditCard, setIsCreditCard] = useState(false);
+  const [isCreditCard, setIsCreditCard] = useState(true); // default to true to allow card-driven flow
   
-  // Dynamic accounts state
+  // Dynamic accounts/cards state
   const [realAccounts, setRealAccounts] = useState<Account[]>([]);
+  const [cards, setCards] = useState<CreditCardType[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedCardId, setSelectedCardId] = useState<string>('');
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [customOrigin, setCustomOrigin] = useState('');
 
@@ -107,7 +110,7 @@ export default function ImportPage() {
   const { parseStatement, loading: aiLoading, error: aiError } = useGemini();
 
   useEffect(() => {
-    async function fetchAccounts() {
+    async function fetchAccountsAndCards() {
       try {
         const accs = await getAccounts();
         setRealAccounts(accs);
@@ -116,11 +119,17 @@ export default function ImportPage() {
           setSelectedAccount(primary.name);
           setSelectedAccountId(primary.id);
         }
+        
+        const bankCards = await getCards();
+        setCards(bankCards);
+        if (bankCards.length > 0) {
+          setSelectedCardId(bankCards[0].id);
+        }
       } catch (err) {
-        console.error('Error fetching accounts in ImportPage:', err);
+        console.error('Error fetching accounts/cards in ImportPage:', err);
       }
     }
-    fetchAccounts();
+    fetchAccountsAndCards();
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,19 +161,45 @@ export default function ImportPage() {
             return;
           }
 
-          // Safe call using our robust useGemini hook
           const fileExtension = file.name.split('.').pop() || 'txt';
-          const data = await parseStatement(text.slice(0, 15000), fileExtension);
+          
+          // Layer 1: Parser Bruto running locally (No server load, completely cleans the input!)
+          const cleanLines = FinancialImportService.parseRawText(text);
 
-          if (!data || !data.transactions) {
-            throw new Error('Não foi possível identificar nenhuma transação válida no documento.');
+          if (cleanLines.length === 0) {
+            throw new Error('Não foi possível identificar linhas de lançamento válidas neste arquivo.');
           }
 
-          setTransactions(data.transactions || []);
-          setInsights(data.insights || null);
-          setIsCreditCard(data.isCreditCard || false);
+          // Layer 2: Estruturador IA using optimized minimized payload
+          const structuredList = await FinancialImportService.queryStructuredIA(
+            cleanLines,
+            fileExtension,
+            parseStatement
+          );
+
+          if (!structuredList || structuredList.length === 0) {
+            throw new Error('Não foi possível recuperar registros estruturados válidos.');
+          }
+
+          setTransactions(structuredList);
+
+          // Calculate visual analysis insights
+          const totalAmt = Math.abs(structuredList.reduce((acc, curr) => acc + Number(curr.amount || 0), 0));
+          const forecastNext = totalAmt * 1.05;
+          const futureInstSum = structuredList
+            .filter(t => t.is_installment)
+            .reduce((acc, curr) => acc + Math.abs(Number(curr.amount || 0)) * (curr.installment_total - curr.installment_current), 0);
+
+          setInsights({
+            analysis: `Identificamos ${structuredList.length} transações no documento. O algoritmo Financeiro Finna estruturou e organizou todas as parcelas subsequentes de forma autônoma.`,
+            totalCurrentStatement: totalAmt,
+            forecastNextMonth: forecastNext,
+            futureInstallmentsTotal: futureInstSum,
+            wastes: structuredList.filter(t => Math.abs(t.amount) > 400).map(t => `Compra expressiva em ${t.merchant}: R$ ${Math.abs(t.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`)
+          });
+
           setStep('review');
-          toast.success(data.isCreditCard ? 'Fatura de cartão analisada com sucesso!' : 'Extrato processado com sucesso!');
+          toast.success(isCreditCard ? 'Fatura de cartão analisada com sucesso!' : 'Extrato processado com sucesso!');
         } catch (innerErr: any) {
           console.error('Fetch error:', innerErr);
           toast.error('Erro na análise por IA: ' + innerErr.message);
@@ -178,7 +213,6 @@ export default function ImportPage() {
         setParsing(false);
       };
 
-      // For PDF we might need specialized reading, but for this demo context we treat as text
       reader.readAsText(file);
     } catch (err: any) {
       console.error(err);
@@ -190,121 +224,21 @@ export default function ImportPage() {
   const saveTransactions = async () => {
     setParsing(true);
     try {
-      const sourceName = customOrigin || selectedAccount;
-      
-      // Determine final account_id
-      const matchedAcc = realAccounts.find(a => a.id === selectedAccountId || a.name === sourceName);
-      const accId = matchedAcc ? matchedAcc.id : null;
+      // Find the card configuration
+      const card = cards.find(c => c.id === selectedCardId) || cards[0];
+      const cardId = card ? card.id : 'card-1';
+      const closingDay = card ? card.closing_day : 10;
+      const dueDay = card ? card.due_day : 17;
 
-      // 1. SUPABASE MODE
-      if (isSupabaseConfigured) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          toast.error('Você precisa estar logado para salvar.');
-          setParsing(false);
-          return;
-        }
+      // Layer 3: Motor Financeiro computes all fingerprints and projects paid, current, and future installments
+      const result = await FinancialImportService.processImportedFinances(
+        cardId,
+        closingDay,
+        dueDay,
+        transactions
+      );
 
-        const rawTxs = transactions.map(tx => {
-          const finalAmount = tx.amount;
-          return {
-            user_id: user.id,
-            description: tx.description,
-            amount: finalAmount,
-            category: tx.category || 'Outros',
-            date: tx.date,
-            type: finalAmount > 0 ? ('income' as const) : ('expense' as const),
-            is_subscription: tx.isSubscription || false,
-            is_recurring: tx.isRecurring || false,
-            installments: tx.installments || null,
-            emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
-            status: 'completed',
-            source: sourceName,
-            account_id: accId
-          };
-        });
-
-        // Load existing transactions in Supabase to do a depara check
-        const { data: dbTxList } = await supabase.from('transactions').select('*');
-        const existingList = dbTxList || [];
-
-        const txsToSave = expandInstallmentTransactions(rawTxs, true);
-
-        const { finalTransactions, skippedCount } = filterDuplicateTransactions(
-          txsToSave,
-          existingList
-        );
-
-        if (finalTransactions.length > 0) {
-          const { error } = await supabase.from('transactions').insert(finalTransactions);
-          if (error) throw error;
-        }
-
-        // Sum up total import amounts to update balance (excluding skipped ones)
-        const totalDelta = finalTransactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
-        if (matchedAcc && totalDelta !== 0) {
-          const { error: balanceErr } = await supabase
-            .from('accounts')
-            .update({ balance: matchedAcc.balance + totalDelta })
-            .eq('id', matchedAcc.id);
-          if (balanceErr) console.error('Error updating account balance in DB:', balanceErr);
-        }
-
-        if (skippedCount > 0) {
-          toast.success(`${finalTransactions.length} transações salvas com sucesso no banco de dados. ${skippedCount} duplicadas foram detectadas e evitadas (depara).`);
-        } else {
-          toast.success(`${txsToSave.length} transações salvas com sucesso no banco de dados!`);
-        }
-      } else {
-        // 2. OFFLINE / LOCALSTORAGE MODE
-        const localSaved = localStorage.getItem('finna_transactions');
-        const existingList = localSaved ? JSON.parse(localSaved) : [];
-
-        const rawLocalTxs = transactions.map(tx => {
-          const finalAmount = tx.amount;
-          return {
-            description: tx.description,
-            amount: finalAmount,
-            category: tx.category || 'Outros',
-            date: tx.date,
-            type: finalAmount > 0 ? 'income' : 'expense',
-            is_subscription: tx.isSubscription || false,
-            is_recurring: tx.isRecurring || false,
-            installments: tx.installments || null,
-            emotion: tx.suggestedEmotion || tx.emotion || 'Neutro',
-            status: 'completed',
-            source: sourceName,
-            account_id: accId
-          };
-        });
-
-        const generatedTxs = expandInstallmentTransactions(rawLocalTxs, false);
-
-        const { finalTransactions, skippedCount } = filterDuplicateTransactions(
-          generatedTxs,
-          existingList
-        );
-
-        localStorage.setItem('finna_transactions', JSON.stringify([...finalTransactions, ...existingList]));
-
-        // Update local balance of account
-        const totalDelta = finalTransactions.reduce((accValue, curr) => accValue + Number(curr.amount), 0);
-        if (matchedAcc && totalDelta !== 0) {
-          const allLocalAccs = realAccounts.map(a => {
-            if (a.id === matchedAcc.id) {
-              return { ...a, balance: a.balance + totalDelta };
-            }
-            return a;
-          });
-          localStorage.setItem('finna_accounts', JSON.stringify(allLocalAccs));
-        }
-
-        if (skippedCount > 0) {
-          toast.success(`${finalTransactions.length} transações salvas. ${skippedCount} duplicadas foram detectadas e evitadas (depara).`);
-        } else {
-          toast.success(`${transactions.length} transações salvas localmente no modo demonstração!`);
-        }
-      }
+      toast.success(`Reconstrução concluída com sucesso! Foram vinculadas ${result.createdPurchases.length} compras originais e criadas ${result.createdInstallments.length} parcelas históricas/futuras (com projeções de competência e vencimento vinculados)!`);
 
       setStep('upload');
       setFile(null);
@@ -344,40 +278,26 @@ export default function ImportPage() {
           <div>
             <h2 className="text-2xl font-bold text-slate-50 italic flex items-center gap-3">
               {isCreditCard ? <CreditCard className="text-indigo-400 w-7 h-7" /> : <FileUp className="text-indigo-400 w-7 h-7" />}
-              Revisão de {isCreditCard ? 'Fatura' : 'Extrato'}
+              Revisão de Fatura de Cartão
               <div className="flex items-center gap-2 ml-4">
-                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest italic">Origem:</span>
-                <Select value={selectedAccountId} onValueChange={(val) => {
-                  setSelectedAccountId(val);
-                  const matched = realAccounts.find(a => a.id === val);
-                  if (matched) {
-                    setSelectedAccount(matched.name);
-                    setCustomOrigin(matched.name);
-                  }
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest italic">Cartão Alvo:</span>
+                <Select value={selectedCardId} onValueChange={(val) => {
+                  setSelectedCardId(val);
                 }}>
-                  <SelectTrigger className="h-8 bg-[#0a0a0d] border-slate-800 text-[10px] w-48 rounded-lg focus:border-indigo-500 transition-all font-bold text-indigo-400">
-                    <SelectValue placeholder="Selecione a conta..." />
+                  <SelectTrigger className="h-8 bg-[#0a0a0d] border-slate-800 text-[10px] w-52 rounded-lg focus:border-indigo-500 transition-all font-bold text-indigo-400">
+                    <SelectValue placeholder="Selecione o cartão..." />
                   </SelectTrigger>
                   <SelectContent className="bg-[#09090B] border-slate-800 text-slate-100">
-                    {realAccounts.map(acc => (
-                      <SelectItem key={acc.id} value={acc.id} className="text-[11px] font-medium text-slate-200">
-                        {acc.name}
+                    {cards.map(car => (
+                      <SelectItem key={car.id} value={car.id} className="text-[11px] font-medium text-slate-200">
+                        {car.name} (Vence dia {car.due_day})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Button 
-                  type="button" 
-                  onClick={() => setIsNewAccountModalOpen(true)}
-                  className="bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700/40 text-indigo-400 font-bold h-8 px-2.5 rounded-lg flex items-center gap-1 transition-all text-[10px] shrink-0 font-sans"
-                  title="Criar nova conta"
-                >
-                  <Plus className="w-3 h-3" />
-                  Nova
-                </Button>
               </div>
             </h2>
-            <p className="text-slate-400 text-sm">Validando {transactions.length} transações identificadas pela FinnaAI.</p>
+            <p className="text-slate-400 text-sm">Validando {transactions.length} transações e parcelas identificadas pela FinnaAI.</p>
           </div>
           <div className="flex gap-3">
              <Button variant="outline" onClick={() => setStep('upload')} className="rounded-xl border-slate-800 text-slate-400 hover:bg-slate-800">Cancelar</Button>
@@ -395,7 +315,7 @@ export default function ImportPage() {
            <div className="lg:col-span-2 space-y-6">
               {isCreditCard && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card className="bg-slate-900/40 border-slate-800 p-5 rounded-2xl relative overflow-hidden group">
+                  <UICard className="bg-slate-900/40 border-slate-800 p-5 rounded-2xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
                       <CalendarClock className="w-12 h-12" />
                     </div>
@@ -404,19 +324,19 @@ export default function ImportPage() {
                     <p className="text-[10px] text-indigo-400 font-medium mt-2 flex items-center gap-1 italic">
                       <Sparkles className="w-3 h-3" /> Baseado em recorrências e parcelas
                     </p>
-                  </Card>
-                  <Card className="bg-slate-900/40 border-slate-800 p-5 rounded-2xl relative overflow-hidden group">
+                  </UICard>
+                  <UICard className="bg-slate-900/40 border-slate-800 p-5 rounded-2xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
                       <TrendingUp className="text-emerald-500 w-12 h-12" />
                     </div>
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Total Compras Parceladas</span>
                     <p className="text-2xl font-bold text-slate-50 mt-1 italic">R$ {insights?.futureInstallmentsTotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '---'}</p>
                     <p className="text-[10px] text-slate-500 font-medium mt-2 uppercase tracking-tighter">Comprometimento de renda futuro</p>
-                  </Card>
+                  </UICard>
                 </div>
               )}
 
-              <Card className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl overflow-hidden">
+              <UICard className="bg-slate-900/40 border-slate-800 shadow-none rounded-3xl overflow-hidden">
                  <table className="w-full text-left text-sm">
                     <thead className="bg-[#09090B] text-[10px] uppercase font-bold text-slate-500 tracking-widest border-b border-slate-800/50">
                        <tr>
@@ -443,7 +363,7 @@ export default function ImportPage() {
                             </td>
                             <td className="px-4 py-4">
                                <Badge variant="outline" className="text-[9px] border-slate-800 text-indigo-400/70 italic font-bold">
-                                 {customOrigin || selectedAccount}
+                                 {cards.find(c => c.id === selectedCardId)?.name || 'Cartão Secundário'}
                                </Badge>
                             </td>
                             <td className="px-4 py-4">
@@ -469,11 +389,11 @@ export default function ImportPage() {
                        ))}
                     </tbody>
                  </table>
-              </Card>
+              </UICard>
            </div>
 
            <div className="space-y-6">
-              <Card className="bg-indigo-600 text-white rounded-3xl p-6 border-none relative overflow-hidden shadow-2xl shadow-indigo-600/20">
+              <UICard className="bg-indigo-600 text-white rounded-3xl p-6 border-none relative overflow-hidden shadow-2xl shadow-indigo-600/20">
                  <div className="absolute -bottom-10 -right-10 opacity-10">
                     <Sparkles className="w-48 h-48" />
                  </div>
@@ -492,10 +412,10 @@ export default function ImportPage() {
                        <span className="font-bold">{transactions.length}</span>
                     </div>
                  </div>
-              </Card>
+              </UICard>
 
               {insights?.wastes?.length > 0 && (
-                <Card className="bg-slate-900 border-slate-800 rounded-3xl p-6">
+                <UICard className="bg-slate-900 border-slate-800 rounded-3xl p-6">
                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2 italic">
                      <AlertCircle className="w-4 h-4 text-rose-400" /> Possíveis Desperdícios
                    </h4>
@@ -507,7 +427,7 @@ export default function ImportPage() {
                         </li>
                       ))}
                    </ul>
-                </Card>
+                </UICard>
               )}
            </div>
         </div>
@@ -566,7 +486,7 @@ export default function ImportPage() {
         </div>
       </div>
 
-      <Card className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
+      <UICard className="bg-slate-900/40 border-slate-800 border-dashed border-2 rounded-3xl p-12 text-center transition-all hover:border-indigo-500/50 group relative">
 
         <input 
           type="file" 
@@ -592,7 +512,7 @@ export default function ImportPage() {
              </div>
           </div>
         </label>
-      </Card>
+      </UICard>
 
       {file && (
         <div className="flex justify-center animate-in slide-in-from-top-2 duration-300">

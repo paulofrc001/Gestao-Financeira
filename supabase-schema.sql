@@ -277,3 +277,54 @@ DROP POLICY IF EXISTS "Users can manage own notifications" ON notifications;
 CREATE POLICY "Users can manage own notifications" ON notifications
   FOR ALL TO authenticated
   USING (auth.uid() = user_id);
+
+-- ============================================
+-- 5. NEW PROFESSIONAL IMPORT SYSTEM TABLES
+-- ============================================
+
+-- purchases Table
+CREATE TABLE IF NOT EXISTS purchases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  merchant TEXT NOT NULL,
+  description TEXT,
+  category TEXT NOT NULL DEFAULT 'Outros',
+  purchase_date DATE NOT NULL,
+  total_amount DECIMAL(15, 2) NOT NULL,
+  installment_amount DECIMAL(15, 2) NOT NULL,
+  installments_total INTEGER NOT NULL DEFAULT 1,
+  card_id UUID REFERENCES cards(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- purchase_installments Table
+CREATE TABLE IF NOT EXISTS purchase_installments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id UUID REFERENCES purchases(id) ON DELETE CASCADE,
+  installment_number INTEGER NOT NULL,
+  amount DECIMAL(15, 2) NOT NULL,
+  due_date DATE NOT NULL,
+  invoice_reference_month TEXT NOT NULL, -- Format: YYYY-MM
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'paid'
+  paid_at DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_installments ENABLE ROW LEVEL SECURITY;
+
+-- PURCHASES and INSTALLMENTS policies
+DROP POLICY IF EXISTS "Users can manage own purchases" ON purchases;
+CREATE POLICY "Users can manage own purchases" ON purchases
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "Users can manage own purchase installments" ON purchase_installments;
+CREATE POLICY "Users can manage own purchase installments" ON purchase_installments
+  FOR ALL TO authenticated
+  USING (
+    purchase_id IN (SELECT id FROM purchases WHERE user_id = auth.uid())
+  );
+

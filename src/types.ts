@@ -105,3 +105,31 @@ export interface AppNotification {
   is_read: boolean;
   created_at: string;
 }
+
+export interface Purchase {
+  id: string;
+  user_id?: string;
+  merchant: string;
+  description: string;
+  category: string;
+  purchase_date: string;
+  total_amount: number;
+  installment_amount: number;
+  installments_total: number;
+  card_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PurchaseInstallment {
+  id: string;
+  purchase_id: string;
+  installment_number: number;
+  amount: number;
+  due_date: string;
+  invoice_reference_month: string;
+  status: 'pending' | 'paid';
+  paid_at?: string | null;
+  created_at?: string;
+}
+

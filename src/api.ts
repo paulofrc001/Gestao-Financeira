@@ -165,48 +165,38 @@ app.post('/api/ai/chat', enforceServerRateLimit, async (req, res) => {
 });
 
 app.post('/api/ai/parse-statement', enforceServerRateLimit, async (req, res) => {
-  console.log('[API] Processing parse-statement request...');
+  console.log('[API] Processing parse-statement request with pre-parsed compact text...');
   try {
     const { text, fileType } = req.body;
     if (!text) return res.status(400).json({ error: 'Faltando texto' });
 
     const prompt = `
-      Aja como um extrator de dados financeiros de alto nível e analista preditivo.
-      Analise o texto abaixo extraído de um arquivo ${fileType}. Pode ser um extrato bancário ou uma fatura de CARTÃO DE CRÉDITO.
+      Aja como um extrator e estruturador de dados de faturas e extratos de altíssima precisão. Sua única tarefa é estruturar as linhas financeiras pré-processadas fornecidas.
       
-      TAREFAS:
-      1. Extraia todas as transações possíveis.
-      2. Identifique se o documento é uma FATURA DE CARTÃO DE CRÉDITO.
-      3. Para cada transação: data (YYYY-MM-DD), descrição, valor (negativo para gastos), categoria, isSubscription, isRecurring.
-      4. Categorização automática baseada em padrões.
-      5. PREVISÃO: Se for cartão, identifique parcelamentos (ex: "Compra X 1/10") e projete gastos futuros.
-      6. IA INSIGHTS: Identifique desperdícios, assinaturas duplicadas e sugira cortes.
+      ATENÇÃO: Não faça cálculos financeiros complexos, não projete parcelas futuras e não calcule regras de faturamento adicionais. Sua tarefa é apenas estruturar cada linha no formato solicitado.
 
-      Texto do documento:
+      Formato de entrada (linhas simplificadas em JSON):
       ${text}
-      
-      Responda APENAS em formato JSON:
+
+      Para cada item na lista, você deve extrair o nome do estabelecimento comercial ("merchant" simplificado e limpo), mantendo a descrição original ("description"), a data original da compra ("purchase_date" no formato de data YYYY-MM-DD), o valor ("amount" como número real de ponto flutuante, negativo para despesas), se é parcelado ("is_installment"), a parcela atual ("installment_current") e o total de parcelas ("installment_total"), e categorizar adequadamente ("category").
+
+      Retorne APENAS um JSON no formato descrito abaixo:
       {
-        "isCreditCard": Boolean,
+        "isCreditCard": true,
         "transactions": [
           {
-            "date": "YYYY-MM-DD",
-            "description": "String",
-            "amount": Number,
-            "category": "String",
-            "isSubscription": Boolean,
-            "isRecurring": Boolean,
-            "installments": "String (ex: '1/5') ou null",
-            "suggestedEmotion": "String"
+            "merchant": "Nome do Estabelecimento limpo (ex: HAVAN)",
+            "description": "Descrição original da compra (ex: HAVAN FRANCA)",
+            "purchase_date": "YYYY-MM-DD (Data original de quando a compra ocorreu)",
+            "amount": -239.99,
+            "is_installment": true,
+            "installment_current": 6,
+            "installment_total": 10,
+            "currency": "BRL",
+            "category": "Shopping / Alimentação / Transporte / Etc",
+            "raw_text": "Texto bruto da linha"
           }
-        ],
-        "insights": {
-           "wastes": ["String"],
-           "totalCurrentStatement": Number,
-           "forecastNextMonth": Number,
-           "futureInstallmentsTotal": Number,
-           "analysis": "String curta com tom de advisor financeiro"
-        }
+        ]
       }
     `;
 
