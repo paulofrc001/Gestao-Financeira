@@ -12,8 +12,8 @@ import { Heart, Brain, AlertCircle, Save, Undo2, CreditCard, Calendar, Layers } 
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { toast } from 'sonner';
 import { fetchCategories, Category } from '../lib/categoriesStore';
-import { getCards } from '../lib/accountsCardsStore';
-import { format } from 'date-fns';
+import { getCards, getInvoiceBillingMonth } from '../lib/accountsCardsStore';
+import { format, parseISO, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 const formSchema = z.object({
@@ -27,6 +27,8 @@ const formSchema = z.object({
   isImpulse: z.boolean().default(false),
   necessityLevel: z.string().optional(),
   applyToAllSimilar: z.boolean().default(false),
+  installments: z.string().optional(),
+  due_date: z.string().optional(),
 });
 
 interface EditTransactionDialogProps {
@@ -109,13 +111,149 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
       source: 'Manual',
       emotion: 'Neutro',
       necessityLevel: '3',
-      applyToAllSimilar: false
+      applyToAllSimilar: false,
+      installments: '',
+      due_date: ''
     }
   });
+
+  const getNextInstallmentLabel = (instStr: string) => {
+    if (!instStr || !instStr.includes('/')) return '';
+    const [curr, tot] = instStr.split('/').map(Number);
+    if (isNaN(curr) || isNaN(tot) || curr >= tot) return 'N/A';
+    return `${curr + 1}/${tot}`;
+  };
+
+  const handleLaunchInstallment = async (allRemaining: boolean) => {
+    const instStr = form.watch('installments');
+    if (!instStr || !instStr.includes('/')) {
+      toast.error('Informe o valor das parcelas no formato ex: 2/10');
+      return;
+    }
+
+    const [curr, tot] = instStr.split('/').map(Number);
+    if (isNaN(curr) || isNaN(tot) || curr >= tot) {
+      toast.error('Número de parcelas inválido ou já finalizado.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const baseDateStr = form.watch('date');
+      const baseDate = baseDateStr ? parseISO(baseDateStr) : new Date();
+      const baseDueDateStr = form.watch('due_date');
+      const baseDueDate = baseDueDateStr ? parseISO(baseDueDateStr) : null;
+      
+      const category = form.watch('category');
+      const description = form.watch('description');
+      const amount = -Math.abs(Number(form.watch('amount')));
+      const source = form.watch('source') || 'Nativo';
+
+      const listToGenerate = [];
+      const startInst = curr + 1;
+      const endInst = allRemaining ? tot : curr + 1;
+
+      for (let i = startInst; i <= endInst; i++) {
+        const offset = i - curr;
+        const targetDate = addMonths(baseDate, offset);
+        const targetDateStr = format(targetDate, 'yyyy-MM-dd');
+
+        let targetDueDateStr = '';
+        if (baseDueDate) {
+          targetDueDateStr = format(addMonths(baseDueDate, offset), 'yyyy-MM-dd');
+        } else {
+          const card = cards.find(c => c.id === transaction.card_id);
+          if (card) {
+            const billingMonth = getInvoiceBillingMonth(targetDateStr, card.closing_day, card.due_day);
+            const [y, m] = billingMonth.split('-');
+            const dueDayPref = String(card.due_day).padStart(2, '0');
+            targetDueDateStr = `${y}-${m}-${dueDayPref}`;
+          }
+        }
+
+        const cleanDesc = getBaseDescription(description);
+        const newDesc = `${cleanDesc} (${i}/${tot})`;
+
+        listToGenerate.push({
+          description: newDesc,
+          amount,
+          date: targetDateStr,
+          type: 'expense',
+          category,
+          emotion: form.watch('emotion') || 'Neutro',
+          is_impulse: !!form.watch('isImpulse'),
+          necessity_level: form.watch('necessityLevel') ? Number(form.watch('necessityLevel')) : null,
+          source,
+          card_id: transaction.card_id,
+          account_id: transaction.account_id || null,
+          installments: `${i}/${tot}`,
+          status: 'pending',
+          due_date: targetDueDateStr,
+          notes: targetDueDateStr ? `[Vencimento: ${targetDueDateStr}]` : ''
+        });
+      }
+
+      if (!isSupabaseConfigured) {
+        const localSaved = localStorage.getItem('finna_transactions');
+        const txs = localSaved ? JSON.parse(localSaved) : [];
+        const generated = listToGenerate.map(t => ({
+          ...t,
+          id: 'tx-' + Math.random().toString(36).substring(2, 9),
+        }));
+        localStorage.setItem('finna_transactions', JSON.stringify([...generated, ...txs]));
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Usuário não autenticado no Supabase');
+        
+        const rows = listToGenerate.map(t => ({
+          user_id: user.id,
+          description: t.description,
+          amount: t.amount,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          emotion: t.emotion,
+          is_impulse: t.is_impulse,
+          necessity_level: t.necessity_level,
+          source: t.source,
+          card_id: t.card_id,
+          account_id: t.account_id,
+          installments: t.installments,
+          status: t.status,
+          notes: t.notes
+        }));
+
+        const { error } = await supabase.from('transactions').insert(rows);
+        if (error) throw error;
+      }
+
+      toast.success(
+        allRemaining 
+          ? `Sucesso! Foram lançadas as parcelas de ${curr + 1} até ${tot} para os próximos meses.`
+          : `Sucesso! Parcela ${curr + 1}/${tot} lançada para o próximo mês.`
+      );
+      
+      onOpenChange(false);
+      onSuccess();
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Erro ao lançar parcelas futuras: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Load transaction values into form when transaction prop changes
   useEffect(() => {
     if (transaction) {
+      let defaultDueDate = transaction.due_date || '';
+      if (!defaultDueDate && transaction.notes && transaction.notes.includes('[Vencimento:')) {
+        const match = transaction.notes.match(/\[Vencimento:\s*([0-9-]{10})\]/);
+        if (match) {
+          defaultDueDate = match[1];
+        }
+      }
+
       form.reset({
         description: transaction.description || '',
         amount: String(Math.abs(Number(transaction.amount || 0))),
@@ -126,7 +264,9 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
         source: transaction.source || 'Manual',
         isImpulse: !!transaction.is_impulse,
         necessityLevel: transaction.necessity_level ? String(transaction.necessity_level) : '3',
-        applyToAllSimilar: false
+        applyToAllSimilar: false,
+        installments: transaction.installments || '',
+        due_date: defaultDueDate
       });
     }
   }, [transaction, form]);
@@ -158,6 +298,9 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
               is_impulse: values.isImpulse,
               necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
               source: values.source || 'Manual',
+              installments: values.installments || null,
+              due_date: values.due_date || null,
+              notes: values.due_date ? `[Vencimento: ${values.due_date}]` : ''
             };
           } else if (values.applyToAllSimilar && t.description?.trim().toLowerCase() === transaction.description?.trim().toLowerCase()) {
             updatedSimilarCount++;
@@ -188,6 +331,7 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
 
     setLoading(true);
     try {
+      const notesValue = values.due_date ? `[Vencimento: ${values.due_date}]` : '';
       const { error } = await supabase
         .from('transactions')
         .update({
@@ -200,6 +344,8 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
           is_impulse: values.isImpulse,
           necessity_level: values.necessityLevel ? Number(values.necessityLevel) : null,
           source: values.source || 'Manual',
+          installments: values.installments || null,
+          notes: notesValue
         })
         .eq('id', transaction.id);
 
@@ -342,6 +488,78 @@ export default function EditTransactionDialog({ open, onOpenChange, transaction,
                     {form.watch('applyToAllSimilar') ? 'Sim' : 'Não'}
                   </Button>
                 </div>
+
+                {/* CAMPOS DE PARCELAMENTO & VENCIMENTO DA FATURA */}
+                {transaction && (transaction.card_id || form.watch('installments')) && (
+                  <div className="p-4 bg-slate-900/65 rounded-2xl border border-slate-800 space-y-4 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <div className="flex items-center gap-2 border-b border-indigo-950/20 pb-2">
+                      <CreditCard className="w-4 h-4 text-indigo-400" />
+                      <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">Detalhes de Parcelas & Vencimento</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-installments" className="text-[10px] uppercase font-bold text-slate-500 italic block">Identificação da Parcela</Label>
+                        <Input 
+                          id="edit-installments" 
+                          placeholder="Ex: 2/10" 
+                          className="rounded-xl border-slate-800 bg-slate-950 h-10 text-xs text-slate-100 placeholder:text-slate-755 h-11" 
+                          {...form.register('installments')} 
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-due-date" className="text-[10px] uppercase font-bold text-slate-500 italic block">Vencimento da Fatura</Label>
+                        <Input 
+                          id="edit-due-date" 
+                          type="date"
+                          className="rounded-xl border-slate-800 bg-slate-950 h-10 text-xs text-slate-100 focus:border-indigo-500 h-11" 
+                          {...form.register('due_date')} 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Projeção / Lancamento manual rápido das parcelas seguintes */}
+                    {form.watch('installments') && form.watch('installments').includes('/') && (
+                      <div className="pt-3 border-t border-slate-800/60 space-y-2">
+                        <div className="flex justify-between items-center column-gap-2">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-bold text-indigo-400 block uppercase">Lançamento & Projeção Futura</span>
+                            <span className="text-[9px] text-slate-400 block leading-tight">Projete parcelas nos meses seguintes com respectivo vencimento</span>
+                          </div>
+                          {getNextInstallmentLabel(form.watch('installments')) !== 'N/A' && (
+                            <div className="bg-indigo-650/40 text-indigo-300 text-[9px] font-extrabold px-2 py-0.5 rounded-lg border border-indigo-500/20 shrink-0">
+                              Próxima: {getNextInstallmentLabel(form.watch('installments'))}
+                            </div>
+                          )}
+                        </div>
+
+                        {getNextInstallmentLabel(form.watch('installments')) !== 'N/A' ? (
+                          <div className="flex gap-2 pt-1">
+                            <Button
+                              type="button"
+                              onClick={() => handleLaunchInstallment(false)}
+                              className="flex-1 bg-slate-850 hover:bg-slate-800 border border-slate-805 text-[9px] font-bold py-1.5 h-9 uppercase tracking-wider text-slate-300 rounded-xl"
+                            >
+                              Lançar Próxima
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={() => handleLaunchInstallment(true)}
+                              className="flex-1 bg-indigo-600 hover:bg-indigo-505 text-[9px] font-bold py-1.5 h-9 uppercase tracking-wider text-white rounded-xl shadow-lg shadow-indigo-600/10"
+                            >
+                              Lançar Todas Restantes
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="text-[9.5px] text-emerald-400 bg-emerald-900/10 border border-emerald-950/30 p-2 rounded-xl font-medium">
+                            Este parcelamento já encontra-se faturado integralmente (última parcela atingida).
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* CRONOGRAMA DE PROJEÇÕES E PARCELAS FUTURAS */}
                 {relatedTransactions.length > 1 && (

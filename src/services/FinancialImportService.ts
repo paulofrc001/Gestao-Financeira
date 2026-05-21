@@ -194,12 +194,28 @@ export class FinancialImportService {
           let instTot = 0;
           let isInst = false;
           
-          if (tx.installments && String(tx.installments).includes('/')) {
-            const parts = String(tx.installments).split('/');
-            instCurr = parseInt(parts[0], 10) || 0;
-            instTot = parseInt(parts[1], 10) || 0;
-            isInst = instTot > 0;
-          } else if (originalLine && originalLine.isInstallment) {
+          const possibleSources = [
+            tx.installments,
+            tx.description,
+            tx.merchant,
+            originalLine?.raw,
+            originalLine?.description
+          ].filter(Boolean).map(String);
+
+          for (const src of possibleSources) {
+            const m = src.match(/\((0?\d+|[1-9]\d*)\s*[\/xXhH\-de]+\s*(0?\d+|[1-9]\d*)\)/) ||
+                      src.match(/\[(0?\d+|[1-9]\d*)\s*[\/xXhH\-de]+\s*(0?\d+|[1-9]\d*)\]/) ||
+                      src.match(/\b(0?\d+|[1-9]\d*)\s*[\/xX]\s*(0?\d+|[1-9]\d*)\b/) ||
+                      src.match(/\b(0?\d+|[1-9]\d*)\s+de\s+(0?\d+|[1-9]\d*)\b/i);
+            if (m) {
+              instCurr = parseInt(m[1], 10);
+              instTot = parseInt(m[2], 10);
+              isInst = instTot > 0;
+              break;
+            }
+          }
+
+          if (!isInst && originalLine && originalLine.isInstallment) {
             instCurr = originalLine.installmentCurrent;
             instTot = originalLine.installmentTotal;
             isInst = true;

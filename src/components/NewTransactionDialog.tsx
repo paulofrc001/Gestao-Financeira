@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Heart, AlertCircle, Save } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { toast } from 'sonner';
-import { getAccounts, getCards, Account, Card as CreditCardType, saveAccount } from '../lib/accountsCardsStore';
+import { getAccounts, getCards, Account, Card as CreditCardType, saveAccount, getInvoiceBillingMonth } from '../lib/accountsCardsStore';
 import { addMonths, format, parseISO } from 'date-fns';
 import { fetchCategories, Category } from '../lib/categoriesStore';
 
@@ -24,6 +24,7 @@ const formSchema = z.object({
   source: z.string().optional(),
   isImpulse: z.boolean().default(false),
   necessityLevel: z.string().optional(),
+  due_date: z.string().optional(),
 });
 
 export default function NewTransactionDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
@@ -46,7 +47,8 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
       isImpulse: false,
       source: 'Manual',
       emotion: 'Neutro',
-      necessityLevel: '3'
+      necessityLevel: '3',
+      due_date: ''
     }
   });
 
@@ -84,6 +86,26 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
     }
   }, [txType]);
 
+  // Dynamic prediction of invoice due date
+  const watchDate = form.watch('date');
+  useEffect(() => {
+    if (paymentMethod === 'card' && selectedCardId && watchDate) {
+      const card = cards.find(c => c.id === selectedCardId);
+      if (card) {
+        try {
+          const billingMonth = getInvoiceBillingMonth(watchDate, card.closing_day, card.due_day);
+          const [year, month] = billingMonth.split('-');
+          const dueDayPref = String(card.due_day).padStart(2, '0');
+          form.setValue('due_date', `${year}-${month}-${dueDayPref}`);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } else if (paymentMethod !== 'card') {
+      form.setValue('due_date', '');
+    }
+  }, [watchDate, selectedCardId, paymentMethod, cards]);
+
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setLoading(true);
     const amountNum = Number(values.amount);
@@ -109,10 +131,19 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
 
           for (let i = 1; i <= installments; i++) {
             const installmentDate = addMonths(baseDate, i - 1);
-            const installmentDateStr = format(installmentDate, 'yyyy-MM-mm').replace(/-[0-9]{2}$/, '-' + String(installmentDate.getDate()).padStart(2, '0')); 
-            // Fix eventual format issues with simple format:
             const finalDateStr = format(installmentDate, 'yyyy-MM-dd');
             
+            let targetDueDateStr = '';
+            if (values.due_date) {
+              const baseDueDate = parseISO(values.due_date);
+              targetDueDateStr = format(addMonths(baseDueDate, i - 1), 'yyyy-MM-dd');
+            } else if (card) {
+              const billingMonth = getInvoiceBillingMonth(finalDateStr, card.closing_day, card.due_day);
+              const [y, m] = billingMonth.split('-');
+              const dueDayPref = String(card.due_day).padStart(2, '0');
+              targetDueDateStr = `${y}-${m}-${dueDayPref}`;
+            }
+
             generatedTxs.push({
               id: 'tx-' + Math.random().toString(36).substring(2, 9),
               description: `${values.description} (${i}/${installments})`,
@@ -126,7 +157,9 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
               source: sourceName,
               card_id: selectedCardId,
               installments: `${i}/${installments}`,
-              status: 'completed'
+              status: 'completed',
+              due_date: targetDueDateStr,
+              notes: targetDueDateStr ? `[Vencimento: ${targetDueDateStr}]` : ''
             });
           }
 
@@ -134,6 +167,19 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
         } else {
           // Regular bank transaction or single payment card purchase
           const finalAmount = values.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+          
+          let targetDueDateStr = '';
+          if (paymentMethod === 'card' && card) {
+            if (values.due_date) {
+              targetDueDateStr = values.due_date;
+            } else {
+              const billingMonth = getInvoiceBillingMonth(values.date, card.closing_day, card.due_day);
+              const [y, m] = billingMonth.split('-');
+              const dueDayPref = String(card.due_day).padStart(2, '0');
+              targetDueDateStr = `${y}-${m}-${dueDayPref}`;
+            }
+          }
+
           const newTx = {
             id: 'tx-' + Math.random().toString(36).substring(2, 9),
             description: values.description,
@@ -147,7 +193,9 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
             source: sourceName,
             account_id: paymentMethod === 'account' ? selectedAccountId : undefined,
             card_id: paymentMethod === 'card' ? selectedCardId : undefined,
-            status: 'completed'
+            status: 'completed',
+            due_date: targetDueDateStr || undefined,
+            notes: targetDueDateStr ? `[Vencimento: ${targetDueDateStr}]` : ''
           };
 
           // If bank debit/credit account, update its balance in LocalStorage
@@ -182,7 +230,20 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
         const rowsToInsert = [];
 
         for (let i = 1; i <= installments; i++) {
-          const installmentDateStr = format(addMonths(baseDate, i - 1), 'yyyy-MM-dd');
+          const installmentDate = addMonths(baseDate, i - 1);
+          const installmentDateStr = format(installmentDate, 'yyyy-MM-dd');
+
+          let targetDueDateStr = '';
+          if (values.due_date) {
+            const baseDueDate = parseISO(values.due_date);
+            targetDueDateStr = format(addMonths(baseDueDate, i - 1), 'yyyy-MM-dd');
+          } else if (card) {
+            const billingMonth = getInvoiceBillingMonth(installmentDateStr, card.closing_day, card.due_day);
+            const [y, m] = billingMonth.split('-');
+            const dueDayPref = String(card.due_day).padStart(2, '0');
+            targetDueDateStr = `${y}-${m}-${dueDayPref}`;
+          }
+
           rowsToInsert.push({
             user_id: user.id,
             description: `${values.description} (${i}/${installments})`,
@@ -197,7 +258,8 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
             account_id: card ? card.account_id : null,
             card_id: selectedCardId,
             installments: `${i}/${installments}`,
-            status: 'completed'
+            status: 'completed',
+            notes: targetDueDateStr ? `[Vencimento: ${targetDueDateStr}]` : ''
           });
         }
 
@@ -206,6 +268,19 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
       } else {
         // Single regular transaction
         const finalAmount = values.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+        
+        let targetDueDateStr = '';
+        if (paymentMethod === 'card' && card) {
+          if (values.due_date) {
+            targetDueDateStr = values.due_date;
+          } else {
+            const billingMonth = getInvoiceBillingMonth(values.date, card.closing_day, card.due_day);
+            const [y, m] = billingMonth.split('-');
+            const dueDayPref = String(card.due_day).padStart(2, '0');
+            targetDueDateStr = `${y}-${m}-${dueDayPref}`;
+          }
+        }
+
         const { error } = await supabase.from('transactions').insert({
           user_id: user.id,
           description: values.description,
@@ -219,7 +294,8 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
           source: sourceName,
           account_id: paymentMethod === 'account' ? selectedAccountId : (card ? card.account_id : null),
           card_id: paymentMethod === 'card' ? selectedCardId : null,
-          status: 'completed'
+          status: 'completed',
+          notes: targetDueDateStr ? `[Vencimento: ${targetDueDateStr}]` : ''
         });
 
         if (error) throw error;
@@ -371,6 +447,22 @@ export default function NewTransactionDialog({ open, onOpenChange }: { open: boo
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+
+                      {/* Vencimento da Fatura (Opcional Override) */}
+                      <div className="pt-2 border-t border-slate-900/80 space-y-1.5">
+                        <Label htmlFor="due_date" className="text-[10px] uppercase font-bold text-slate-400 block">Vencimento da Fatura da Parcela</Label>
+                        <div className="relative">
+                          <Input 
+                            id="due_date" 
+                            type="date"
+                            className="rounded-xl border-slate-800 bg-slate-950 h-10 text-xs text-slate-100 focus:border-indigo-500 font-medium" 
+                            {...form.register('due_date')}
+                          />
+                          <span className="text-[9px] text-indigo-500/80 block mt-1 font-semibold italic">
+                            Previsão de vencimento com base no fechamento do cartão ({cards.find(c => c.id === selectedCardId)?.due_day ? `Vencimento todo dia ${cards.find(c => c.id === selectedCardId)?.due_day}` : 'Dinâmico'})
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}
