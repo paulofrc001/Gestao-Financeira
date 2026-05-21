@@ -98,16 +98,33 @@ export class FinancialImportService {
         }
       }
 
-      // Pre-extract installment pattern
+      // Pre-extract installment pattern by checking a copy of the line with the date removed
       let isInstallment = false;
       let installmentCurrent = 0;
       let installmentTotal = 0;
 
-      const instMatch = trimmed.match(installmentRegex) || trimmed.match(installmentDeRegex);
-      if (instMatch) {
+      let stringForInstallment = trimmed;
+      if (dateMatch) {
+        stringForInstallment = stringForInstallment.replace(dateMatch[0], '');
+      }
+
+      // Check parenthesized patterns first (e.g. (02/10) or [02/10])
+      const parenMatch = stringForInstallment.match(/\((\d{1,2})\s*[\/xXhH\-de]+\s*(\d{1,2})\)/) ||
+                          stringForInstallment.match(/\[(\d{1,2})\s*[\/xXhH\-de]+\s*(\d{1,2})\]/);
+
+      let instMatch = null;
+      if (parenMatch) {
         isInstallment = true;
-        installmentCurrent = parseInt(instMatch[1], 10);
-        installmentTotal = parseInt(instMatch[2], 10);
+        installmentCurrent = parseInt(parenMatch[1], 10);
+        installmentTotal = parseInt(parenMatch[2], 10);
+        instMatch = parenMatch;
+      } else {
+        instMatch = stringForInstallment.match(installmentRegex) || stringForInstallment.match(installmentDeRegex);
+        if (instMatch) {
+          isInstallment = true;
+          installmentCurrent = parseInt(instMatch[1], 10);
+          installmentTotal = parseInt(instMatch[2], 10);
+        }
       }
 
       // Try to clean description description
@@ -171,7 +188,8 @@ export class FinancialImportService {
       const response = await parseAiCallback(compactText, 'json');
       // If the AI structured response exists, return it, mapped to full model expectations
       if (response && response.transactions) {
-        return response.transactions.map((tx: any) => {
+        return response.transactions.map((tx: any, index: number) => {
+          const originalLine = cleanLines[index];
           let instCurr = 0;
           let instTot = 0;
           let isInst = false;
@@ -181,18 +199,22 @@ export class FinancialImportService {
             instCurr = parseInt(parts[0], 10) || 0;
             instTot = parseInt(parts[1], 10) || 0;
             isInst = instTot > 0;
+          } else if (originalLine && originalLine.isInstallment) {
+            instCurr = originalLine.installmentCurrent;
+            instTot = originalLine.installmentTotal;
+            isInst = true;
           }
 
           return {
-            merchant: tx.merchant || tx.description || 'Compra',
-            description: tx.description || 'Compra no Crédito',
-            purchase_date: tx.date || format(new Date(), 'yyyy-MM-dd'),
+            merchant: tx.merchant || originalLine?.description || tx.description || 'Compra',
+            description: tx.description || originalLine?.description || 'Compra no Crédito',
+            purchase_date: tx.date || originalLine?.date || format(new Date(), 'yyyy-MM-dd'),
             is_installment: isInst,
             installment_current: instCurr,
             installment_total: instTot,
-            amount: tx.amount,
+            amount: tx.amount !== undefined ? tx.amount : (originalLine ? -Math.abs(originalLine.amount) : 0),
             category: tx.category || 'Outros',
-            raw_text: tx.raw_text || compactText
+            raw_text: tx.raw_text || originalLine?.raw || compactText
           };
         });
       }
@@ -458,13 +480,28 @@ export class FinancialImportService {
       const merchantLabel = matchPurch ? matchPurch.merchant : 'Compra Parcelada';
       const installmentLabel = matchPurch ? `(${inst.installment_number}/${matchPurch.installments_total})` : '';
       
+      let txDate = `${inst.invoice_reference_month}-15`; // Default fallback of target cycle
+      if (matchPurch) {
+        try {
+          const originalDay = parseISO(matchPurch.purchase_date).getDate();
+          const [year, month] = inst.invoice_reference_month.split('-');
+          const targetDate = new Date(Number(year), Number(month) - 1, 15);
+          const lastDayOfMonth = new Date(Number(year), Number(month), 0).getDate();
+          const safeDay = Math.min(originalDay, lastDayOfMonth);
+          targetDate.setDate(safeDay);
+          txDate = format(targetDate, 'yyyy-MM-dd');
+        } catch (e) {
+          console.error('Error computing matching legacy tx date:', e);
+        }
+      }
+
       return {
         id: isSupabase ? undefined : 'tx-' + Math.random().toString(36).substring(2, 9),
         user_id: userUUID,
         description: `${merchantLabel} ${installmentLabel}`.trim(),
         amount: -Math.abs(inst.amount), // expense (negative)
         category: matchPurch ? matchPurch.category : 'Outros',
-        date: `${inst.invoice_reference_month}-01`,
+        date: txDate,
         type: 'expense',
         status: inst.status === 'paid' ? 'completed' : 'pending',
         installments: matchPurch ? `${inst.installment_number}/${matchPurch.installments_total}` : null,
