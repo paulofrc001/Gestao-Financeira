@@ -45,7 +45,7 @@ export const INITIAL_DEMO_CARDS: Card[] = [
 ];
 
 // Helper to determine which invoice billing month a purchase falls into
-export function getInvoiceBillingMonth(dateStr: string, closingDay: number): string {
+export function getInvoiceBillingMonth(dateStr: string, closingDay: number, dueDay?: number): string {
   try {
     const parts = dateStr.split('-');
     const year = Number(parts[0]);
@@ -54,9 +54,19 @@ export function getInvoiceBillingMonth(dateStr: string, closingDay: number): str
 
     let billingDate = new Date(year, month, 15); // Use mid-month to avoid timezone jumps
     
-    if (day > closingDay) {
+    const parsedClosingDay = Number(closingDay);
+    if (!isNaN(parsedClosingDay) && day > parsedClosingDay) {
       // Falls into next month's invoice
       billingDate = addMonths(billingDate, 1);
+    }
+    
+    // If dueDay is less than closingDay, it means the invoice is paid in the month AFTER the closing month.
+    // So the cash outflow (billing month) is shifted by 1 month.
+    if (dueDay !== undefined) {
+      const parsedDueDay = Number(dueDay);
+      if (!isNaN(parsedDueDay) && !isNaN(parsedClosingDay) && parsedDueDay < parsedClosingDay) {
+        billingDate = addMonths(billingDate, 1);
+      }
     }
     
     return format(billingDate, 'yyyy-MM');
@@ -380,8 +390,8 @@ export function calculateCardMetrics(
 } {
   const cardTxs = transactions.filter(t => t.card_id === card.id);
   const now = new Date();
-  const currentMonthValue = getInvoiceBillingMonth(format(now, 'yyyy-MM-dd'), card.closing_day);
-  const nextMonthValue = getInvoiceBillingMonth(format(addMonths(now, 1), 'yyyy-MM-dd'), card.closing_day);
+  const currentMonthValue = getInvoiceBillingMonth(format(now, 'yyyy-MM-dd'), card.closing_day, card.due_day);
+  const nextMonthValue = getInvoiceBillingMonth(format(addMonths(now, 1), 'yyyy-MM-dd'), card.closing_day, card.due_day);
 
   let currentBill = 0;
   let nextBill = 0;
@@ -394,7 +404,7 @@ export function calculateCardMetrics(
     // Income (payments/credits) reduces the bill, expense adds to it
     const finalAmount = isIncome ? -amountVal : amountVal;
 
-    const billingMonth = getInvoiceBillingMonth(tx.date, card.closing_day);
+    const billingMonth = getInvoiceBillingMonth(tx.date, card.closing_day, card.due_day);
 
     byMonth[billingMonth] = (byMonth[billingMonth] || 0) + finalAmount;
     totalOutstanding += finalAmount;
